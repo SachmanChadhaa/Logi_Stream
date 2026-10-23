@@ -97,7 +97,7 @@ public class ExecutionService {
 
             testResults.add(new TestResult(
                     t.idx(), t.label(), t.isPublic(),
-                    r.statusId(), r.statusDescription(),
+                    r.statusId(), BucketMapper.displayStatus(r, matched),
                     matched,
                     r.time(),
                     t.stdin(), t.expectedOutput(), r.stdout(), r.combinedError()));

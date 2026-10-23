@@ -102,6 +102,15 @@ public final class BucketMapper {
         return ACCEPTED.equals(b) ? NO_TESTS : b;
     }
 
+    /**
+     * Per-test status text. The sandbox reports "Accepted" for any clean exit;
+     * status 3 with mismatched output is a Wrong Answer (section 8), so say so
+     * instead of showing (and prompting the tutor with) "Accepted" on a failure.
+     */
+    public static String displayStatus(Result r, boolean matched) {
+        return r.statusId() == 3 && !matched ? "Wrong Answer" : r.statusDescription();
+    }
+
     /** Java compares stdout itself; Judge0 never sees expected_output (section 8). */
     public static boolean outputMatches(String stdout, String expected) {
         return normalise(stdout).equals(normalise(expected));

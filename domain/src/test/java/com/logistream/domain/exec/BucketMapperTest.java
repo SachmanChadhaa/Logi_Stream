@@ -158,4 +158,12 @@ class BucketMapperTest {
         assertEquals(BucketMapper.TLE, BucketMapper.bucketOfUnverified(r(5, "", ""), false));
         assertEquals(BucketMapper.INFRA_ERROR, BucketMapper.bucketOfUnverified(r(13, "", ""), false));
     }
+
+    @Test
+    @DisplayName("a clean exit with the wrong output is shown as Wrong Answer, not Accepted")
+    void wrongOutputIsNotLabelledAccepted() {
+        assertEquals("Wrong Answer", BucketMapper.displayStatus(r(3, "4", ""), false));
+        assertEquals("desc", BucketMapper.displayStatus(r(3, "9", ""), true));
+        assertEquals("desc", BucketMapper.displayStatus(r(5, "", ""), false));
+    }
 }
