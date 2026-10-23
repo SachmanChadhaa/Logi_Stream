@@ -45,6 +45,7 @@ class LLMError(RuntimeError):
 
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+_THINK_RE = re.compile(r"<think>.*?(</think>|$)", re.DOTALL | re.IGNORECASE)
 
 
 def extract_json(text: str) -> str:
@@ -88,13 +89,20 @@ def complete(
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
+        # Local qwen3 "thinks" by default: measured 80 s and 301 tokens for a
+        # one-line question, vs 5 s and 15 tokens with thinking off. LiteLLM
+        # forwards this to Ollama; other providers ignore it (drop_params).
+        extra_body=None if config.LLM_THINK else {"think": False},
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
     )
     took = time.perf_counter() - t0
-    content = (resp.choices[0].message.content or "").strip()
+    # Reasoning models (local qwen3 via Ollama) may prepend a <think> block.
+    # It is the model's scratchpad, never meant for a student, and it would
+    # also break JSON parsing -- so it is removed before anything else sees it.
+    content = _THINK_RE.sub("", resp.choices[0].message.content or "").strip()
     log.info("llm model=%s took=%.1fs chars=%d", model, took, len(content))
     if not content:
         raise LLMError(f"model {model} returned an empty message")

@@ -38,6 +38,7 @@ echo "${BOLD}LogiStream — stopping${RESET}"
 kill_port 3000 "web"
 kill_port 8000 "gateway"
 kill_port 8001 "orchestrator"
+kill_port "${INTEL_PORT:-8003}" "intel"
 kill_port 8080 "domain"
 
 if [ "$ALL" = "1" ]; then

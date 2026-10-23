@@ -1,0 +1,6 @@
+# Local tutor/evaluator model for LogiStream (litellm_config.yaml).
+# Same weights as qwen3-14b-64k, but an 8k context: the 40k default made the
+# KV cache 16 GB, pushing 62% of the model onto the CPU of an 8 GB GPU.
+#   ollama create logistream-qwen3 -f ollama/Modelfile.logistream-qwen3
+FROM qwen3-14b-64k
+PARAMETER num_ctx 8192

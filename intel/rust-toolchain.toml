@@ -1,0 +1,12 @@
+# Pinned to the GNU toolchain, not MSVC.
+#
+# This machine has no Visual Studio C++ toolset, so the msvc target cannot link:
+# rust invokes `link.exe`, which on Git Bash resolves to coreutils' link.exe
+# (/usr/bin/link.exe) and fails with "extra operand". Installing VS Build Tools
+# needs UAC and several GB.
+#
+# The gnu toolchain ships its own linker via the rust-mingw component, so it
+# builds with no admin rights and nothing else installed. Same binary, same
+# behaviour; only the linker backend differs.
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"

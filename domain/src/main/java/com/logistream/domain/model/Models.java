@@ -32,8 +32,24 @@ public final class Models {
             int rubricVersion,
             BigDecimal cpuTimeLimit,
             BigDecimal wallTimeLimit,
-            int memoryLimitKb) {
+            int memoryLimitKb,
+            String kind,
+            String ownerId,
+            String language,
+            String constraintsText) {
+
+        public boolean isCustom() {
+            return KIND_CUSTOM.equals(kind);
+        }
+
+        /** Curated problems are public; a custom one is visible to its owner only. */
+        public boolean visibleTo(String userId) {
+            return !isCustom() || (ownerId != null && ownerId.equals(userId));
+        }
     }
+
+    public static final String KIND_CURATED = "curated";
+    public static final String KIND_CUSTOM = "custom";
 
     /** One row of app.hidden_tests. */
     public record TestRow(
@@ -56,7 +72,44 @@ public final class Models {
             String description,
             JsonNode examples,
             String starter_code,
-            String language) {
+            String language,
+            String kind,
+            String constraints,
+            int test_count) {
+    }
+
+    /** One entry of GET /internal/problems: enough to render a picker. */
+    public record ProblemSummary(
+            String id,
+            String title,
+            String kind,
+            String language,
+            String created_at) {
+    }
+
+    // ------------------------------------------------- bring your own problem
+
+    /** One example as the student typed it; explanation is optional. */
+    public record ExampleInput(String input, String output, String explanation) {
+    }
+
+    /** One student-supplied test: stdin in, expected stdout out. */
+    public record TestInput(String label, String input, String expected_output) {
+    }
+
+    /**
+     * POST /internal/problems. The owner is never in the body: it comes from the
+     * X-User-Id header the gateway sets, so a client cannot create a problem for
+     * someone else.
+     */
+    public record CreateProblemRequest(
+            String title,
+            String statement,
+            String constraints,
+            List<ExampleInput> examples,
+            String starter_code,
+            String language,
+            List<TestInput> tests) {
     }
 
     // ----------------------------------------------------------- internal API
@@ -68,7 +121,11 @@ public final class Models {
             String description,
             JsonNode rubric,
             int rubric_version,
-            String starter_code) {
+            String starter_code,
+            String kind,
+            String constraints,
+            JsonNode examples,
+            String language) {
     }
 
     /** POST /internal/execute request. */

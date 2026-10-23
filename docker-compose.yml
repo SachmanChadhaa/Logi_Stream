@@ -36,6 +36,8 @@ services:
       - OPENROUTER_API_KEY_2=${OPENROUTER_API_KEY_2:-${OPENROUTER_API_KEY_1}}
       - OPENROUTER_API_KEY_3=${OPENROUTER_API_KEY_3:-${OPENROUTER_API_KEY_1}}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-logistream-dev}
+      # local Ollama on the host (primary model since 2026-10-23, see litellm_config.yaml)
+      - OLLAMA_API_BASE_FOR_LITELLM=${OLLAMA_API_BASE_FOR_LITELLM:-http://host.docker.internal:11434}
     ports:
       - "4000:4000"
     volumes:

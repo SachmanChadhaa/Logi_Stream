@@ -42,7 +42,10 @@ public class ExecutionService {
     public ExecuteResponse execute(ProblemRow problem, String studentSource) {
         List<TestRow> tests = repo.findTests(problem.id());
         if (tests.isEmpty()) {
-            throw new IllegalStateException("problem " + problem.id() + " has no tests");
+            if (!problem.isCustom()) {
+                throw new IllegalStateException("problem " + problem.id() + " has no tests");
+            }
+            return smokeRun(problem, studentSource);
         }
 
         // the harness is appended after the student's code, exactly as section 8 says
@@ -94,7 +97,7 @@ public class ExecutionService {
 
             testResults.add(new TestResult(
                     t.idx(), t.label(), t.isPublic(),
-                    r.statusId(), r.statusDescription(),
+                    r.statusId(), BucketMapper.displayStatus(r, matched),
                     matched,
                     r.time(),
                     t.stdin(), t.expectedOutput(), r.stdout(), r.combinedError()));
@@ -107,6 +110,40 @@ public class ExecutionService {
                 problem.id(), bucket, passed, tests.size(), totalRequests, infraRetryUsed);
 
         return new ExecuteResponse(bucket, passed, tests.size(), infraRetryUsed, testResults);
+    }
+
+    /**
+     * A student's own problem may come without tests. Run the program once on
+     * empty stdin so they still get real errors, real output and real timing --
+     * but never a pass: the bucket is NO_TESTS, passed/total is 0/0, and the
+     * single row says plainly that nothing was compared.
+     */
+    private ExecuteResponse smokeRun(ProblemRow problem, String studentSource) {
+        String source = studentSource + "\n\n" + problem.harnessPython();
+        Submission s = new Submission(source, "",
+                problem.cpuTimeLimit(), problem.wallTimeLimit(), problem.memoryLimitKb());
+        try {
+            BatchOutcome outcome = sandbox.runBatch(List.of(s));
+            if (outcome.results().size() != 1) {
+                return infraError(List.of(), outcome.requestsUsed(), false, "result count mismatch");
+            }
+            Result r = outcome.results().get(0);
+            String bucket = BucketMapper.bucketOfUnverified(r, outcome.timedOut());
+            String status = r.statusId() == 3
+                    ? "Ran (no expected output to compare)" : r.statusDescription();
+            log.info("execute problem={} bucket={} (no tests: smoke run only) requests={}",
+                    problem.id(), bucket, outcome.requestsUsed());
+            return new ExecuteResponse(bucket, 0, 0, false, List.of(new TestResult(
+                    1, "run on empty input (no tests provided)", true,
+                    r.statusId(), status, false, r.time(),
+                    "", null, r.stdout(), r.combinedError())));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return infraError(List.of(), 0, false, "interrupted");
+        } catch (Exception e) {
+            log.error("sandbox call failed: {}", e.toString());
+            return infraError(List.of(), 0, false, e.toString());
+        }
     }
 
     private static boolean needsInfraRetry(BatchOutcome outcome) {

@@ -42,14 +42,21 @@ def logic_tutor(state: SessionState) -> dict[str, Any]:
             "Write a different question that does not do that."
         )
 
-    draft = llm.complete(
-        model=config.LLM_MODEL_TUTOR,
-        system=LOGIC_TUTOR_SYSTEM,
-        user=user,
-        temperature=0.4,   # some variety, so a regeneration is not the same text
-    )
-
     node_path = list(state.get("node_path") or []) + ["logic_tutor"]
+    try:
+        draft = llm.complete(
+            model=config.LLM_MODEL_TUTOR,
+            system=LOGIC_TUTOR_SYSTEM,
+            user=user,
+            temperature=0.4,   # some variety, so a regeneration is not the same text
+        )
+    except Exception as e:                       # noqa: BLE001
+        # same canned reply as an exhausted verify loop: a rubric-written
+        # question, never an invented one, and flagged as a fallback
+        log.error("logic_tutor LLM call failed, using the canned fallback: %s", str(e)[:300])
+        draft = counter or verifier.logic_fallback(rubric, None)
+        return {"draft": draft, "node_path": node_path, "fallback_used": True}
+
     log.info("logic_tutor drafted %d chars (regeneration %d)", len(draft), regen)
     return {"draft": draft, "node_path": node_path}
 

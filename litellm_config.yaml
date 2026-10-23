@@ -30,31 +30,22 @@
 # no longer exists on OpenRouter at all (CLAUDE.md trap 12, exactly as warned).
 
 model_list:
+  # 2026-10-23: the free OpenRouter models above are gone (qwen3.8-27b:free
+  # "unavailable for free", nemotron backup 404). On the owner's decision the
+  # PRIMARY deployment is now the local qwen3 on this laptop's Ollama: free,
+  # offline, no rate limits. It shares the 8 GB GPU with the vision model, so
+  # Ollama swaps them; expect slow first tokens after a swap. host.docker.internal
+  # is how this container reaches Ollama on the host.
+  # OpenRouter stays as the backup group, so restoring a working cloud model is
+  # a one-line change there.
+
   # ---------------------------------------------------------------- evaluator
-  # Judges the student's Hinglish logic and must hold a JSON contract.
-  # Three deployments share one model_name, so the router load-balances them.
   - model_name: logistream-evaluator
     litellm_params:
-      model: openrouter/qwen/qwen3.8-27b:free
-      api_key: os.environ/OPENROUTER_API_KEY_1
-      api_base: https://openrouter.ai/api/v1
+      model: ollama_chat/logistream-qwen3
+      api_base: os.environ/OLLAMA_API_BASE_FOR_LITELLM
       temperature: 0
 
-  - model_name: logistream-evaluator
-    litellm_params:
-      model: openrouter/qwen/qwen3.8-27b:free
-      api_key: os.environ/OPENROUTER_API_KEY_2
-      api_base: https://openrouter.ai/api/v1
-      temperature: 0
-
-  - model_name: logistream-evaluator
-    litellm_params:
-      model: openrouter/qwen/qwen3.8-27b:free
-      api_key: os.environ/OPENROUTER_API_KEY_3
-      api_base: https://openrouter.ai/api/v1
-      temperature: 0
-
-  # last resort when qwen is limited on every key
   - model_name: logistream-evaluator-backup
     litellm_params:
       model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
@@ -63,25 +54,11 @@ model_list:
       temperature: 0
 
   # -------------------------------------------------------------------- tutor
-  # Writes the Socratic turn. Every output is machine-verified downstream, so a
-  # weaker fallback model is safe here: it cannot leak the answer.
+  # Every output is machine-verified downstream, so a weaker fallback is safe.
   - model_name: logistream-tutor
     litellm_params:
-      model: openrouter/qwen/qwen3.8-27b:free
-      api_key: os.environ/OPENROUTER_API_KEY_1
-      api_base: https://openrouter.ai/api/v1
-
-  - model_name: logistream-tutor
-    litellm_params:
-      model: openrouter/qwen/qwen3.8-27b:free
-      api_key: os.environ/OPENROUTER_API_KEY_2
-      api_base: https://openrouter.ai/api/v1
-
-  - model_name: logistream-tutor
-    litellm_params:
-      model: openrouter/qwen/qwen3.8-27b:free
-      api_key: os.environ/OPENROUTER_API_KEY_3
-      api_base: https://openrouter.ai/api/v1
+      model: ollama_chat/logistream-qwen3
+      api_base: os.environ/OLLAMA_API_BASE_FOR_LITELLM
 
   - model_name: logistream-tutor-backup
     litellm_params:
@@ -90,12 +67,12 @@ model_list:
       api_base: https://openrouter.ai/api/v1
 
 router_settings:
-  routing_strategy: simple-shuffle   # spreads load across the three keys
-  num_retries: 3
+  routing_strategy: simple-shuffle
+  num_retries: 1      # a local model that failed once will not succeed by retrying fast
   retry_after: 5
   # A free-tier turn has been measured past 90s. A shorter timeout here would
   # cut off a slow but perfectly good answer (CLAUDE.md trap 8).
-  timeout: 120
+  timeout: 170
   allowed_fails: 3
   cooldown_time: 30
   fallbacks:
@@ -104,7 +81,7 @@ router_settings:
 
 litellm_settings:
   drop_params: true          # free models reject params they do not implement
-  request_timeout: 120
+  request_timeout: 170
   set_verbose: false
 
 general_settings:

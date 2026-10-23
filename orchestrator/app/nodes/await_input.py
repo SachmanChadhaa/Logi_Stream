@@ -55,6 +55,12 @@ def await_input(state: SessionState) -> dict[str, Any]:
     elif etype == "chat":
         update["status"] = "LOGIC_CHAT" if state.get("phase") == "LOGIC" else "CODE_CHAT"
         update["messages"] = [message("student", "chat", text)]
+    elif etype == "observe":
+        # A screen observation: the local VLM's short TEXT, never the image
+        # (main.observe calls Ollama before resuming). Not a student message, and
+        # the status is left alone -- the observer is quiet.
+        update["pending_event"] = {"type": etype, "text": text,
+                                   "observation": (event or {}).get("observation") or {}}
 
     return update
 
@@ -72,7 +78,9 @@ def route_after_input(state: SessionState) -> str:
     if etype == "code" and phase == "CODE":
         return "execute_code"
     if etype == "chat" and phase == "CODE":
-        return "code_tutor"
+        return "diagnose"
+    if etype == "observe" and phase in ("LOGIC", "CODE"):
+        return "diagnose"
 
     # The API layer rejects invalid combinations with 409 before they get here,
     # so this is a genuine "should not happen". Going back to await_input is the

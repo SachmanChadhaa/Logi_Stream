@@ -13,6 +13,13 @@ SUCCESS_MESSAGE = (
     "wrote code that does exactly that - which is the whole point."
 )
 
+# Honest about what "verified" means when the student wrote the tests.
+CUSTOM_SUCCESS_MESSAGE = (
+    "All {total} of your tests passed. That is verified against the tests you "
+    "supplied - it is exactly as strong as those tests, so consider an edge case "
+    "they do not cover."
+)
+
 
 def finish(state: SessionState) -> dict[str, Any]:
     execution = state.get("last_execution") or {}
@@ -24,6 +31,8 @@ def finish(state: SessionState) -> dict[str, Any]:
     return {
         "phase": "DONE",
         "status": "SUCCESS",
-        "messages": [message("system", "info", SUCCESS_MESSAGE)],
+        "messages": [message("system", "info",
+                             CUSTOM_SUCCESS_MESSAGE.format(total=execution.get("total"))
+                             if state.get("problem_kind") == "custom" else SUCCESS_MESSAGE)],
         "node_path": list(state.get("node_path") or []) + ["finish"],
     }

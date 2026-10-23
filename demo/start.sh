@@ -84,8 +84,13 @@ if curl -sf --max-time 2 http://localhost:8080/health >/dev/null 2>&1; then
   ok "already running"
 else
   JAR=$(ls -1 "$ROOT"/domain/target/domain-*.jar 2>/dev/null | grep -v original | head -1)
+  # rebuild when any source is newer than the jar, so a stale build never runs
+  if [ -n "$JAR" ] && [ -n "$(find "$ROOT/domain/src" "$ROOT/domain/pom.xml" -newer "$JAR" -type f 2>/dev/null | head -1)" ]; then
+    echo "    sources changed since the last build; rebuilding..."
+    JAR=""
+  fi
   if [ -z "$JAR" ]; then
-    echo "    building (first run only)..."
+    echo "    building..."
     (cd "$ROOT/domain" && mvn -q -B -DskipTests package) || die "maven build failed"
     JAR=$(ls -1 "$ROOT"/domain/target/domain-*.jar | grep -v original | head -1)
   fi
@@ -94,13 +99,47 @@ else
     tail -25 "$LOGS/domain.log"; die "java never became healthy"; }
 fi
 
+# ------------------------------------------------- 3b. intel (rust sidecar)
+# Optional: the orchestrator falls back to its rules ranker without it. Trained
+# models are regenerated deterministically on first run (~90 s).
+step "intel sidecar (rust, :${INTEL_PORT:-8003})"
+if curl -sf --max-time 2 "http://127.0.0.1:${INTEL_PORT:-8003}/health" >/dev/null 2>&1; then
+  ok "already running"
+else
+  IBIN="$ROOT/intel/target/release/intel-serve.exe"
+  [ -x "$IBIN" ] || IBIN="$ROOT/intel/target/release/intel-serve"
+  if [ ! -x "$IBIN" ] || [ -n "$(find "$ROOT/intel/src" "$ROOT/intel/Cargo.toml" -newer "$IBIN" -type f 2>/dev/null | head -1)" ]; then
+    echo "    building..."
+    (cd "$ROOT/intel" && cargo build --release >/dev/null 2>&1) || echo "    intel build failed - continuing with the rules ranker"
+  fi
+  if [ -x "$IBIN" ] && [ ! -f "$ROOT/intel/models/booster-v0.json" ]; then
+    echo "    training synthetic v0 models (first run only)..."
+    (cd "$ROOT/intel" && ./target/release/intel-train --out models > "$LOGS/intel-train.log" 2>&1)       || echo "    training failed - see demo/logs/intel-train.log"
+  fi
+  if [ -x "$IBIN" ]; then
+    ( cd "$ROOT/intel" && nohup "$IBIN" > "$LOGS/intel.log" 2>&1 < /dev/null & )
+    wait_http "http://127.0.0.1:${INTEL_PORT:-8003}/health" 20 "healthy"       || echo "    intel did not come up - the tutor uses the rules ranker (see demo/logs/intel.log)"
+  fi
+fi
+
+# ------------------------------------------------- 3c. ollama (local models)
+step "ollama (local LLM + vision model, :11434)"
+if curl -sf --max-time 2 http://127.0.0.1:11434/api/version >/dev/null 2>&1; then
+  ok "already running"
+elif command -v ollama >/dev/null 2>&1; then
+  ( nohup ollama serve > "$LOGS/ollama.log" 2>&1 < /dev/null & )
+  wait_http http://127.0.0.1:11434/api/version 30 "healthy"     || echo "    ollama did not start - tutor turns and the screen observer will be unavailable"
+else
+  echo "    ollama is not installed - tutor turns and the screen observer will be unavailable"
+fi
+
 # ---------------------------------------------------------------- 4. python
 step "orchestrator (python, :8001)"
 if curl -sf --max-time 2 http://localhost:8001/health >/dev/null 2>&1; then
   ok "already running"
 else
   ( cd "$ROOT/orchestrator" && nohup uv run uvicorn app.main:app \
-      --host 0.0.0.0 --port 8001 > "$LOGS/orchestrator.log" 2>&1 < /dev/null & )
+      --host "${ORCHESTRATOR_BIND:-0.0.0.0}" --port 8001 > "$LOGS/orchestrator.log" 2>&1 < /dev/null & )
   wait_http http://localhost:8001/health 90 "healthy" || {
     tail -25 "$LOGS/orchestrator.log"; die "orchestrator never became healthy"; }
 fi
@@ -112,8 +151,8 @@ if curl -sf --max-time 2 http://localhost:8000/health >/dev/null 2>&1; then
 else
   BIN="$ROOT/gateway/target/release/logistream-gateway.exe"
   [ -x "$BIN" ] || BIN="$ROOT/gateway/target/release/logistream-gateway"
-  if [ ! -x "$BIN" ]; then
-    echo "    building (first run only)..."
+  if [ ! -x "$BIN" ] || [ -n "$(find "$ROOT/gateway/src" "$ROOT/gateway/Cargo.toml" -newer "$BIN" -type f 2>/dev/null | head -1)" ]; then
+    echo "    building..."
     (cd "$ROOT/gateway" && cargo build --release) || die "cargo build failed"
   fi
   ( cd "$ROOT/gateway" && nohup "$BIN" > "$LOGS/gateway.log" 2>&1 < /dev/null & )

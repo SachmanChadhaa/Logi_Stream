@@ -1,0 +1,142 @@
+{
+ "schema": "feature_schema_v1",
+ "dim": 30,
+ "features": [
+  "lang_python",
+  "err_none",
+  "err_compile",
+  "err_runtime",
+  "err_failing_test",
+  "err_timeout",
+  "has_error_line",
+  "exception_known",
+  "pass_ratio",
+  "n_tests_norm",
+  "stdout_empty_on_fail",
+  "format_only_mismatch",
+  "edit_size_norm",
+  "changed_lines_norm",
+  "code_unchanged",
+  "dt_since_last_norm",
+  "attempt_norm",
+  "same_bucket_streak_norm",
+  "recent_fail_rate",
+  "stage_custom",
+  "event_run",
+  "event_chat",
+  "event_observation",
+  "event_idle",
+  "vlm_error_visible",
+  "vlm_editing",
+  "vlm_terminal",
+  "vlm_offtask",
+  "loop_nesting_norm",
+  "has_while_true"
+ ],
+ "student_states": [
+  "progressing",
+  "stuck",
+  "thrashing",
+  "idle"
+ ],
+ "cause_groups": [
+  "syntax",
+  "runtime",
+  "performance",
+  "output",
+  "logic",
+  "unverified"
+ ],
+ "causes": [
+  "syntax",
+  "undefined-name",
+  "missing-key",
+  "index-out-of-range",
+  "type-mismatch",
+  "uses-none",
+  "missing-attribute",
+  "bad-conversion",
+  "division-by-zero",
+  "unbounded-recursion",
+  "reads-too-much-input",
+  "module-unavailable",
+  "runtime-crash",
+  "too-slow",
+  "possible-infinite-loop",
+  "prints-nothing",
+  "returns-none",
+  "output-format",
+  "extra-output",
+  "logic-wrong-on-case",
+  "unverified",
+  "unchanged-code"
+ ],
+ "input": {
+  "event_kind": "run",
+  "diag_features": {
+   "bucket": "RUNTIME_ERROR",
+   "exception_type": "KeyError",
+   "has_error_line": true,
+   "pass_ratio": 0.4,
+   "n_tests": 5,
+   "stdout_empty_on_fail": false,
+   "format_only_mismatch": false,
+   "code_changed_since_last_run": true,
+   "same_bucket_streak": 2,
+   "loop_nesting": 1,
+   "has_while_true": false
+  },
+  "changed_lines": 3,
+  "code_lines": 12,
+  "dt_since_last_s": 45.0,
+  "run_history": [
+   {
+    "bucket": "RUNTIME_ERROR"
+   },
+   {
+    "bucket": "RUNTIME_ERROR"
+   },
+   {
+    "bucket": "WRONG_ANSWER"
+   }
+  ],
+  "problem_kind": "custom",
+  "language": "python",
+  "vlm_tags": {
+   "error_visible": true,
+   "terminal": true
+  }
+ },
+ "vector": [
+  1.0,
+  0.0,
+  0.0,
+  1.0,
+  0.0,
+  0.0,
+  1.0,
+  1.0,
+  0.4,
+  0.25,
+  0.0,
+  0.0,
+  0.25,
+  0.06,
+  0.0,
+  0.075,
+  0.15,
+  0.4,
+  1.0,
+  1.0,
+  1.0,
+  0.0,
+  0.0,
+  0.0,
+  1.0,
+  0.0,
+  1.0,
+  0.0,
+  0.333333,
+  0.0
+ ]
+}

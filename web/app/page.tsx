@@ -1,19 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, CircleAlert, FileQuestion, RotateCw, TriangleAlert, X } from "lucide-react";
+
+import { Assistant, openPipWindow } from "@/components/Assistant";
 
 import { ChatPanel } from "@/components/ChatPanel";
 import { Header } from "@/components/Header";
+import { NewProblemForm } from "@/components/NewProblemForm";
+import { PasscodeGate } from "@/components/PasscodeGate";
 import { ProblemPane } from "@/components/ProblemPane";
 import { TestDrawer } from "@/components/TestDrawer";
 import { UnderTheHood } from "@/components/UnderTheHood";
 import { BusyBar, WorkPane } from "@/components/WorkPane";
 import { ApiError, api } from "@/lib/api";
-import type { Problem, SessionView } from "@/lib/types";
+import { type ObserverBinding, useScreenObserver } from "@/lib/screenObserver";
+import type { Problem, ScreenProblem, SessionView } from "@/lib/types";
 
-const PROBLEM_ID = "two-sum";
+// The open problem lives in the URL (?problem=<id>), so a refresh resumes the
+// same session and a sample link like ?problem=two-sum works for the demo.
+// No problem in the URL means the landing page: bring your own problem.
+function readProblemParam(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("problem");
+}
 
-type BusyKind = "logic" | "chat" | "code" | "reset" | "load" | null;
+type BusyKind = "logic" | "chat" | "code" | "reset" | "load" | "look" | null;
+
+const CAPTURE_STILL_ON = "Screen capture is still on. Stop it from the header when you are done.";
 
 const BUSY_LABEL: Record<Exclude<BusyKind, null>, string> = {
   logic: "Evaluating your logic…",
@@ -21,15 +35,100 @@ const BUSY_LABEL: Record<Exclude<BusyKind, null>, string> = {
   code: "Running tests in the sandbox…",
   reset: "Resetting the session…",
   load: "Loading your session…",
+  look: "Looking at your screen first…",
 };
 
+/**
+ * Lives above the per-problem Session, so switching problems keeps the screen
+ * share running and the Picture-in-Picture window open: the capture is only
+ * re-pointed at the new session (ObserverBinding), never restarted.
+ */
+interface Shell {
+  observer: ReturnType<typeof useScreenObserver>;
+  binding: React.RefObject<ObserverBinding | null>;
+  assistantOpen: boolean;
+  setAssistantOpen: (open: boolean) => void;
+  pipWindow: Window | null;
+  setPipWindow: React.Dispatch<React.SetStateAction<Window | null>>;
+  closeRef: React.RefObject<() => void>;
+}
+
 export default function Page() {
+  // undefined until the URL has been read on the client
+  const [problemId, setProblemId] = useState<string | null | undefined>(undefined);
+
+  const binding = useRef<ObserverBinding | null>(null);
+  const observer = useScreenObserver(binding);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [pipWindow, setPipWindow] = useState<Window | null>(null);
+  const closeRef = useRef<() => void>(() => {});
+  const shell: Shell = { observer, binding, assistantOpen, setAssistantOpen, pipWindow, setPipWindow, closeRef };
+
+  useEffect(() => {
+    setProblemId(readProblemParam());
+    const onPop = () => setProblemId(readProblemParam());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const open = useCallback((id: string | null) => {
+    const url = id ? `?problem=${encodeURIComponent(id)}` : window.location.pathname;
+    window.history.pushState(null, "", url);
+    setProblemId(id);
+  }, []);
+
+  if (problemId === undefined) return <div className="h-screen" />;
+
+  return (
+    <PasscodeGate>
+      {problemId === null ? (
+        <div className="flex h-screen flex-col overflow-hidden">
+          <Header view={null} busy={false} />
+          <NewProblemForm onOpen={open} />
+        </div>
+      ) : (
+        // keyed so switching problems starts from a clean slate
+        <Session
+          key={problemId}
+          problemId={problemId}
+          shell={shell}
+          onOpen={open}
+          onHome={() => {
+            // the landing page has no session to observe or assist
+            observer.stop();
+            pipWindow?.close();
+            setPipWindow(null);
+            setAssistantOpen(false);
+            open(null);
+          }}
+        />
+      )}
+    </PasscodeGate>
+  );
+}
+
+function Session({
+  problemId,
+  shell,
+  onOpen,
+  onHome,
+}: {
+  problemId: string;
+  shell: Shell;
+  onOpen: (id: string) => void;
+  onHome: () => void;
+}) {
+  const { observer, binding, assistantOpen, setAssistantOpen, pipWindow, setPipWindow, closeRef } = shell;
   const [problem, setProblem] = useState<Problem | null>(null);
   const [view, setView] = useState<SessionView | null>(null);
   const [busy, setBusy] = useState<BusyKind>(null);
   const [busySince, setBusySince] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [code, setCode] = useState("");
 
   const lastTutorCount = useRef(0);
 
@@ -58,8 +157,8 @@ export default function Page() {
       begin("load");
       try {
         const [p, v] = await Promise.all([
-          api.getProblem(PROBLEM_ID),
-          api.start(PROBLEM_ID),
+          api.getProblem(problemId),
+          api.start(problemId),
         ]);
         if (cancelled) return;
         setProblem(p);
@@ -68,7 +167,9 @@ export default function Page() {
           (m) => m.role === "tutor",
         ).length;
       } catch (e) {
-        if (!cancelled) fail(e);
+        if (cancelled) return;
+        if (e instanceof ApiError && e.status === 404) setNotFound(true);
+        fail(e);
       } finally {
         if (!cancelled) setBusy(null);
       }
@@ -76,7 +177,7 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [problemId, attempt]);
 
   // open the chat by itself whenever a NEW tutor message arrives
   useEffect(() => {
@@ -91,23 +192,29 @@ export default function Page() {
   const send = useCallback(
     async (kind: "logic" | "chat" | "code", text: string) => {
       if (!text.trim()) return;
-      begin(kind);
       try {
-        setView(await api.event(PROBLEM_ID, kind, text));
+        // sharing: look at the screen right now, so the answer is about the
+        // code as it is, not as it was at the last 15 s sample
+        if (kind === "chat" && observer.state === "on") {
+          begin("look");
+          await observer.sample("ask");
+        }
+        begin(kind);
+        setView(await api.event(problemId, kind, text));
       } catch (e) {
         fail(e);
       } finally {
         setBusy(null);
       }
     },
-    [],
+    [problemId, observer],
   );
 
   const onReset = useCallback(async () => {
     begin("reset");
     try {
-      await api.reset(PROBLEM_ID);
-      const v = await api.start(PROBLEM_ID);
+      await api.reset(problemId);
+      const v = await api.start(problemId);
       setView(v);
       lastTutorCount.current = 0;
       setChatOpen(false);
@@ -116,23 +223,138 @@ export default function Page() {
     } finally {
       setBusy(null);
     }
-  }, []);
+  }, [problemId]);
 
   const isBusy = busy !== null;
   const done = view?.phase === "DONE";
 
+  // point the page-level screen capture at this session; unpoint on the way out
+  useEffect(() => {
+    binding.current = {
+      problemId,
+      codeRevision: view?.temporal?.code_revision ?? 0,
+      canSend: !isBusy && !!view && !done,
+      onView: setView,
+    };
+  });
+  useEffect(() => () => {
+    binding.current = null;
+  }, [binding]);
+
+  // the observer read a different problem off the screen and the student said
+  // "tutor me on this": reuse their problem with that title, or create it
+  const switchToScreenProblem = useCallback(async (sp: ScreenProblem) => {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    try {
+      const existing = (await api.listProblems()).problems.find(
+        (p) => p.kind === "custom" && norm(p.title) === norm(sp.title),
+      );
+      const id = existing
+        ? existing.id
+        : (await api.createProblem({
+            title: sp.title.slice(0, 120),
+            statement: sp.statement.trim() || sp.title,
+            language: "python",
+          })).id;
+      onOpen(id);
+    } catch (e) {
+      fail(e);
+    }
+  }, [onOpen]);
+
+  // after a run, look at the screen once more (the run may have changed what
+  // the student sees) -- a tick later, once the busy flag has cleared
+  const lastRunBucket = useRef<string | null>(null);
+  useEffect(() => {
+    const b = view?.last_execution?.bucket ?? null;
+    const rev = view?.temporal?.code_revision;
+    if (b && rev && `${rev}` !== lastRunBucket.current && observer.state === "on") {
+      lastRunBucket.current = `${rev}`;
+      const t = setTimeout(() => observer.sample(b === "ACCEPTED" ? "run" : "error"), 400);
+      return () => clearTimeout(t);
+    }
+  }, [view, observer]);
+
+  const closeAssistant = useCallback(() => {
+    setAssistantOpen(false);
+    setPipWindow((w) => {
+      w?.close();
+      return null;
+    });
+    // only a live share deserves the warning; a picker that was still open
+    // ("starting") ends as cancelled or on, and "on" shows in the header
+    if (observer.state === "on" || observer.state === "paused") {
+      setNotice(CAPTURE_STILL_ON);
+    }
+  }, [observer.state]);
+  useEffect(() => {
+    if (observer.state === "off") setNotice((n) => (n === CAPTURE_STILL_ON ? null : n));
+  }, [observer.state, setAssistantOpen, setPipWindow]);
+  closeRef.current = closeAssistant;
+
+  if (notFound) {
+    return (
+      <div className="flex h-screen flex-col overflow-hidden">
+        <Header view={null} busy={false} onHome={onHome} />
+        <div className="mx-auto mt-24 flex max-w-md flex-col items-center px-4 text-center">
+          <FileQuestion size={28} className="text-[var(--faint)]" aria-hidden />
+          <h1 className="mt-3 text-[18px] font-semibold">Problem not found</h1>
+          <p className="mt-1.5 text-[13px] text-[var(--muted)]">
+            It does not exist, or it belongs to someone else.
+          </p>
+          <button onClick={onHome} className="btn btn-secondary btn-lg mt-5">
+            <ArrowLeft size={14} aria-hidden />
+            Back to problems
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <Header view={view} busy={isBusy} onReset={onReset} />
+      <Header
+        view={view}
+        busy={isBusy}
+        onReset={onReset}
+        onHome={() => {
+          observer.stop();
+          onHome();
+        }}
+        onAssistant={async () => {
+          if (assistantOpen) return;
+          // straight from the click: Chrome only opens PiP inside a user gesture
+          // closing the PiP window goes through closeAssistant too, so a live
+          // capture is never ended -- or forgotten -- silently
+          const w = await openPipWindow(() => closeRef.current());
+          setPipWindow(w);
+          setAssistantOpen(true);
+        }}
+        capture={observer.state}
+        onStopCapture={observer.stop}
+      />
+
+      {notice && (
+        <div role="status" className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--warn-bg)] px-4 py-1.5 text-[12px] text-[var(--warn)]">
+          <TriangleAlert size={13} className="shrink-0" aria-hidden />
+          <span className="flex-1">{notice}</span>
+          <button onClick={() => setNotice(null)} className="icon-btn !h-6 !w-6" aria-label="Dismiss">
+            <X size={13} />
+          </button>
+        </div>
+      )}
 
       {error && (
-        <div className="shrink-0 border-b border-[var(--fail)] bg-[var(--fail-bg)] px-5 py-2 text-xs text-[var(--fail)]">
-          {error}
-          <button
-            onClick={() => setError(null)}
-            className="ml-3 underline opacity-70 hover:opacity-100"
-          >
-            dismiss
+        <div role="alert" className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--fail-bg)] px-4 py-1.5 text-[12px] text-[var(--fail)]">
+          <CircleAlert size={13} className="shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1 break-words">{error}</span>
+          {!view && (
+            <button onClick={() => setAttempt((a) => a + 1)} className="btn btn-ghost !h-6 !text-[var(--fail)]">
+              <RotateCw size={12} aria-hidden /> Retry
+            </button>
+          )}
+          <button onClick={() => setError(null)} className="icon-btn !h-6 !w-6" aria-label="Dismiss">
+            <X size={13} />
           </button>
         </div>
       )}
@@ -140,15 +362,17 @@ export default function Page() {
       <main className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <ProblemPane problem={problem} view={view} />
 
-        <section className="relative flex min-h-0 flex-col bg-[var(--background)]">
+        <section className="relative flex min-h-0 flex-col bg-[var(--surface)]">
           {isBusy && <BusyBar label={BUSY_LABEL[busy]} since={busySince} />}
 
           <WorkPane
             view={view}
             starterCode={problem?.starter_code ?? ""}
+            testCount={problem?.test_count}
             busy={isBusy}
             onSubmitLogic={(t) => send("logic", t)}
             onSubmitCode={(t) => send("code", t)}
+            onCodeChange={setCode}
           />
 
           <TestDrawer execution={view?.last_execution ?? null} />
@@ -159,13 +383,25 @@ export default function Page() {
             onOpenChange={setChatOpen}
             onSend={(t) => send("chat", t)}
             busy={busy === "chat"}
-            disabled={isBusy || done}
+            disabled={isBusy || done || !view}
             done={done}
           />
         </section>
       </main>
 
       <UnderTheHood view={view} />
+
+      <Assistant
+        open={assistantOpen}
+        pipWindow={pipWindow}
+        onClose={closeAssistant}
+        view={view}
+        code={code}
+        busy={isBusy}
+        onSend={(t) => send("chat", t)}
+        observer={observer}
+        onSwitchProblem={switchToScreenProblem}
+      />
     </div>
   );
 }

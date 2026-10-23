@@ -88,6 +88,21 @@ eventually quote them.
 
 ---
 
+## Bring-your-own-problem branch (2026-10-23)
+
+| # | Original plan | What the branch does | Why |
+|---|---|---|---|
+| B1 | Free OpenRouter models via LiteLLM | LiteLLM → **local Ollama** `logistream-qwen3` (qwen3-14b, 8k ctx, thinking off) | Free models withdrawn; owner chose local. OpenRouter stays as backup group. |
+| B2 | Everything on the laptop | UI on **Vercel**, backend on the laptop behind a **Cloudflare quick tunnel** | Public demo URL with zero hosting cost. Passcode + CORS list + rate limit guard the tunnel. |
+| B3 | `sess_<uuid>` per custom problem (brief default) | Server-minted, owner-bound `custom-<uuid>` problem id; thread still `sha256(user:problem)` | Same properties; no session route changed. |
+| B4 | Rust booster ranks causes | Booster runs in **shadow mode**; rules-v1 orders | It loses to the rules on held-out synthetic data; promotion is metrics-gated. |
+| B5 | Services bind 127.0.0.1 | Default 0.0.0.0 with `*_BIND` overrides | `localhost` → v4-only listener costs ~2 s per call on Windows. |
+| B6 | Vision model in the cloud | **Local only** Qwen2.5-VL 3B; non-local `OLLAMA_URL` refuses to start | Brief: no external screenshot API; frames never stored. |
+
+All `intel/` models are **synthetic-trained v0, advisory, unvalidated**; scores are not probabilities.
+
+---
+
 ## Known limitations, stated plainly
 
 | Limitation | Impact | Why it is acceptable here |

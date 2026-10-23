@@ -18,36 +18,58 @@ from app import config
 log = logging.getLogger(__name__)
 
 _context_cache: dict[str, dict[str, Any]] = {}
+# custom problems make this cache unbounded in principle; a crude cap is enough
+_CONTEXT_CACHE_MAX = 256
 
 
 class DomainError(RuntimeError):
     """The domain service could not answer."""
 
 
-def _headers(trace_id: str | None = None) -> dict[str, str]:
+class ProblemNotFound(DomainError):
+    """No such problem -- or it is someone else's custom problem (same answer)."""
+
+
+def _headers(trace_id: str | None = None, user_id: str | None = None) -> dict[str, str]:
     h = {"X-Internal-Token": config.INTERNAL_TOKEN}
     if trace_id:
         h["X-Trace-Id"] = trace_id
+    if user_id:
+        h["X-User-Id"] = user_id
     return h
 
 
-def get_problem_context(problem_id: str, *, trace_id: str | None = None) -> dict[str, Any]:
-    """Problem description + rubric. Cached; call clear_cache() after a reseed."""
-    if problem_id in _context_cache:
+def get_problem_context(
+    problem_id: str,
+    *,
+    trace_id: str | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Problem description + rubric. Cached; call clear_cache() after a reseed.
+
+    Pass user_id to enforce ownership (session start does): Java answers 404 for
+    someone else's custom problem, and the cache is bypassed so the check really
+    happens. Problems are immutable once created, so the cached copy is safe for
+    every later call within a session that already passed that check.
+    """
+    if user_id is None and problem_id in _context_cache:
         return _context_cache[problem_id]
 
     url = f"{config.DOMAIN_URL}/internal/problems/{problem_id}/context"
     try:
-        r = httpx.get(url, headers=_headers(trace_id), timeout=20.0)
+        r = httpx.get(url, headers=_headers(trace_id, user_id), timeout=20.0)
     except httpx.HTTPError as e:
         raise DomainError(f"cannot reach the domain service at {url}: {e}") from e
 
     if r.status_code == 404:
-        raise DomainError(f"unknown problem: {problem_id}")
+        raise ProblemNotFound(f"unknown problem: {problem_id}")
     if r.status_code != 200:
         raise DomainError(f"domain returned {r.status_code} for {url}: {r.text[:200]}")
 
     ctx = r.json()
+    ctx.setdefault("kind", "curated")
+    if len(_context_cache) >= _CONTEXT_CACHE_MAX:
+        _context_cache.clear()
     _context_cache[problem_id] = ctx
     log.info("cached problem context problem=%s rubric_version=%s",
              problem_id, ctx.get("rubric_version"))

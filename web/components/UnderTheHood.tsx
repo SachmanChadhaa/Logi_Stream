@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronUp, Cpu, DatabaseZap, GitBranch, Hash, LifeBuoy } from "lucide-react";
+
 import type { SessionView } from "@/lib/types";
 
 /**
@@ -37,6 +39,9 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
   const ev = view?.last_eval;
   const ex = view?.last_execution;
   const dbg = view?.debug;
+  const dx = view?.diagnosis;
+  const runs = dbg?.run_history;
+  const tm = view?.temporal;
 
   const verdictColour =
     ev?.verdict === "PASS"
@@ -46,46 +51,57 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
         : "text-[var(--fail)]";
 
   return (
-    <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)]">
+    <div className="shrink-0 border-t border-[var(--border)] bg-[var(--chrome)]">
+      {/* a status bar, like the editor's: always one line, opens upward */}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-5 py-2 text-left text-xs font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
+        aria-expanded={open}
+        className="flex h-7 w-full items-center gap-3 px-3 text-left text-[11px] text-[var(--muted)] transition-colors hover:bg-[var(--background)] hover:text-[var(--foreground)]"
       >
-        <span
-          className={`inline-block transition-transform ${open ? "rotate-90" : ""}`}
-        >
-          ▸
+        <span className="flex items-center gap-1.5 font-medium">
+          <Cpu size={12} aria-hidden />
+          Under the hood
+          <ChevronUp size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
         </span>
-        Under the hood
         {ev && (
-          <span className={`ml-1 font-mono ${verdictColour}`}>{ev.verdict}</span>
+          <span className={`flex items-center gap-1 font-mono ${verdictColour}`}>
+            <GitBranch size={11} aria-hidden />
+            {ev.verdict}
+          </span>
         )}
         {ev?.cache_hit && (
-          <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--accent)]">
-            cache hit
+          <span className="flex items-center gap-1 font-mono text-[var(--accent)]">
+            <DatabaseZap size={11} aria-hidden /> cache hit
           </span>
         )}
         {dbg?.fallback_used && (
-          <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--warn)]">
-            fallback
+          <span className="flex items-center gap-1 font-mono text-[var(--warn)]">
+            <LifeBuoy size={11} aria-hidden /> fallback
           </span>
         )}
-        <span className="ml-auto font-mono text-[10px]">
-          {dbg?.trace_id ? `trace ${dbg.trace_id.slice(0, 8)}…` : ""}
+        <span className="ml-auto flex items-center gap-1 font-mono text-[10.5px] text-[var(--faint)]">
+          {dbg?.trace_id && (
+            <>
+              <Hash size={11} aria-hidden />
+              trace {dbg.trace_id.slice(0, 8)}
+            </>
+          )}
         </span>
       </button>
 
       {open && (
-        <div className="scroll-thin max-h-72 overflow-y-auto border-t border-[var(--border)] px-5 py-3 text-xs">
+        <div className="scroll-thin max-h-72 overflow-y-auto border-t border-[var(--border)] bg-[var(--surface)] px-5 py-4 text-[11.5px]">
           <div className="grid gap-6 md:grid-cols-2">
             {/* ---- evaluator ---- */}
             <div>
-              <h3 className="mb-1 font-semibold text-[var(--foreground)]">
+              <h3 className="mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
                 Logic evaluation
               </h3>
               {!ev ? (
                 <p className="text-[var(--muted)]">
-                  No logic evaluated yet.
+                  {view?.problem_kind === "custom"
+                    ? "Your own problem has no rubric, so there is no logic gate. The tutor works from your statement, code and runs."
+                    : "No logic evaluated yet."}
                 </p>
               ) : (
                 <>
@@ -132,7 +148,7 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
 
             {/* ---- verifier + graph ---- */}
             <div>
-              <h3 className="mb-1 font-semibold text-[var(--foreground)]">
+              <h3 className="mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
                 Tutor verification &amp; graph
               </h3>
               <Row label="regenerations" mono>
@@ -176,7 +192,7 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
 
               {ex && (
                 <>
-                  <h3 className="mt-3 mb-1 font-semibold text-[var(--foreground)]">
+                  <h3 className="mt-4 mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
                     Last execution
                   </h3>
                   <Row label="bucket" mono>
@@ -193,6 +209,109 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
                   <Row label="passed" mono>
                     {ex.passed}/{ex.total}
                   </Row>
+                </>
+              )}
+
+              {dx && (
+                <>
+                  <h3 className="mt-4 mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
+                    Diagnosis{" "}
+                    <span className="font-mono text-[10px] font-normal tracking-normal normal-case text-[var(--muted)]">
+                      {dx.ranker}
+                    </span>
+                  </h3>
+                  <p className="mb-1 text-[10px] text-[var(--muted)]">
+                    Advisory ranking; scores are {dx.score_kind}.
+                    {dx.model_version ? ` Booster ${dx.model_version}: synthetic-trained, unvalidated.` : ""}
+                    {dx.iterations ? ` ${dx.iterations} diagnostic pass(es).` : ""}
+                  </p>
+                  {dx.candidates.length ? (
+                    <ol className="list-decimal space-y-1 pl-4">
+                      {dx.candidates.map((c) => (
+                        <li key={c.id}>
+                          <span className="font-mono">{c.id}</span>{" "}
+                          <span className="font-mono text-[var(--muted)]">
+                            (rule {c.score}
+                            {c.model_score !== undefined ? ` · booster ${c.model_score}` : ""})
+                          </span>
+                          <div>{c.cause}</div>
+                          {c.evidence.map((e, i) => (
+                            <div key={i} className="font-mono text-[10px] text-[var(--muted)]">
+                              evidence: {e}
+                            </div>
+                          ))}
+                          <div className="text-[var(--accent)]">next: {c.next_action}</div>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    NONE
+                  )}
+                </>
+              )}
+
+              {tm && (tm.summary || tm.events.length > 0) && (
+                <>
+                  <h3 className="mt-4 mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
+                    Temporal memory{" "}
+                    <span className="font-mono text-[10px] font-normal tracking-normal normal-case text-[var(--muted)]">
+                      rev {tm.code_revision} · {tm.ranker}
+                    </span>
+                  </h3>
+                  <p className="mb-1">{tm.summary}</p>
+                  {tm.student_state && (
+                    <Row label="student state" mono>
+                      {tm.student_state.label}{" "}
+                      <span className="text-[var(--muted)]">
+                        ({tm.student_state.model_version}, synthetic-trained, unvalidated)
+                      </span>
+                    </Row>
+                  )}
+                  {tm.hypotheses.length > 0 && (
+                    <Row label="open hypotheses">
+                      <ul className="list-disc space-y-0.5 pl-4">
+                        {tm.hypotheses.map((h, i) => (
+                          <li key={i}>{h}</li>
+                        ))}
+                      </ul>
+                    </Row>
+                  )}
+                  {tm.next_action && <Row label="next action">{tm.next_action}</Row>}
+                  {tm.screen_code && (
+                    <Row label="code on screen">
+                      <span className="text-[var(--muted)]">
+                        {tm.screen_code.language || "unknown language"} · copied by the local vision model, never run
+                      </span>
+                      <pre className="scroll-thin mt-1 max-h-40 overflow-auto rounded-[var(--radius)] border border-[var(--border)] bg-[var(--background)] p-2 font-mono text-[10.5px]">
+                        {tm.screen_code.text}
+                      </pre>
+                    </Row>
+                  )}
+                  <ul className="mt-1 space-y-0.5 font-mono text-[10px]">
+                    {tm.events.slice(-8).map((e, i) => (
+                      <li key={i} className={e.stale ? "text-[var(--muted)] line-through decoration-[var(--border-strong)]" : ""}>
+                        {new Date(e.ts).toLocaleTimeString()} [{e.kind}, rev {e.code_revision}
+                        {e.stale ? ", seen earlier" : e.source === "screen" ? ", seen on screen" : ""}] {e.text}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              {!!runs?.length && (
+                <>
+                  <h3 className="mt-4 mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
+                    Run history
+                  </h3>
+                  <ul className="space-y-0.5 font-mono text-[10px]">
+                    {runs.slice(-6).map((r, i) => (
+                      <li key={i}>
+                        {new Date(r.ts).toLocaleTimeString()} {r.bucket} {r.passed}/{r.total}
+                        {" · "}code {r.code_sha} · {r.top_cause ?? "—"}
+                        {r.verified ? "" : " · unverified"}
+                      </li>
+                    ))}
+                  </ul>
                 </>
               )}
             </div>

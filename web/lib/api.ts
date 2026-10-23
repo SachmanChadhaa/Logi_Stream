@@ -4,10 +4,85 @@
 // the problem, and ignores any the client supplies. Sending one from here would
 // be pointless as well as wrong.
 
-import type { Problem, SessionView } from "./types";
+import type {
+  NewProblem,
+  ObserverStatus,
+  Problem,
+  ProblemSummary,
+  SessionView,
+} from "./types";
 
-const GATEWAY =
-  process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8000";
+// NEXT_PUBLIC_API_BASE is the deployed setting (the Cloudflare tunnel URL on
+// Vercel); NEXT_PUBLIC_GATEWAY_URL is the older local name, still honoured.
+// The browser calls the gateway directly: a Vercel server-side proxy would cut
+// a 90s tutor turn off at the free tier's function limit.
+const GATEWAY = (
+  process.env.NEXT_PUBLIC_API_BASE ??
+  process.env.NEXT_PUBLIC_GATEWAY_URL ??
+  "http://localhost:8000"
+).replace(/\/+$/, "");
+
+const PASSCODE_KEY = "logistream.passcode";
+const USER_KEY = "logistream.user";
+
+// Storage can throw (private mode, blocked site data); everything here must
+// work without it.
+function store(kind: "session" | "local") {
+  try {
+    return kind === "session" ? window.sessionStorage : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+let memoryPasscode: string | null = null;
+let memoryUser: string | null = null;
+
+/** The demo passcode, kept for this browser session only. */
+export const passcode = {
+  get(): string | null {
+    try {
+      return store("session")?.getItem(PASSCODE_KEY) ?? memoryPasscode;
+    } catch {
+      return memoryPasscode;
+    }
+  },
+  set(value: string | null) {
+    memoryPasscode = value;
+    try {
+      if (value) store("session")?.setItem(PASSCODE_KEY, value);
+      else store("session")?.removeItem(PASSCODE_KEY);
+    } catch {
+      /* memory copy is enough */
+    }
+  },
+};
+
+/**
+ * A random anonymous identity per browser, sent as X-Demo-User. Auth is still
+ * mocked (CLAUDE.md section 3), but on a public demo every visitor must not
+ * share one "demo-user" session. The id is unguessable, and the gateway still
+ * derives the thread from it -- the browser never chooses a thread_id.
+ */
+function anonUser(): string {
+  if (memoryUser) return memoryUser;
+  let id: string | null = null;
+  try {
+    id = store("local")?.getItem(USER_KEY) ?? null;
+  } catch {
+    id = null;
+  }
+  if (!id) {
+    id = `anon-${crypto.randomUUID()}`;
+    try {
+      store("local")?.setItem(USER_KEY, id);
+    } catch {
+      /* per-tab identity then */
+    }
+  }
+  memoryUser = id;
+  return id;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -30,6 +105,8 @@ async function request<T>(
       ...init,
       headers: {
         "Content-Type": "application/json",
+        "X-Demo-User": anonUser(),
+        ...(passcode.get() ? { "X-Demo-Passcode": passcode.get() as string } : {}),
         ...(init.headers ?? {}),
       },
       // A tutor turn on the free tier has been measured past 90s. The browser
@@ -58,6 +135,11 @@ async function request<T>(
       (body as { detail?: string } | null)?.detail ??
       text.slice(0, 300) ??
       res.statusText;
+    if (res.status === 401 && (body as { code?: string } | null)?.code === "passcode_required") {
+      // the PasscodeGate listens for this and asks again
+      passcode.set(null);
+      window.dispatchEvent(new Event(PASSCODE_EVENT));
+    }
     throw new ApiError(res.status, detail, traceId);
   }
 
@@ -66,7 +148,16 @@ async function request<T>(
 
 export const api = {
   getProblem: (problemId: string) =>
-    request<Problem>(`/api/problems/${problemId}`),
+    request<Problem>(`/api/problems/${encodeURIComponent(problemId)}`),
+
+  listProblems: () =>
+    request<{ problems: ProblemSummary[] }>("/api/problems"),
+
+  createProblem: (p: NewProblem) =>
+    request<Problem>("/api/problems", {
+      method: "POST",
+      body: JSON.stringify(p),
+    }),
 
   start: (problemId: string) =>
     request<SessionView>("/api/sessions/start", {
@@ -87,7 +178,31 @@ export const api = {
     }),
 
   get: (problemId: string) =>
-    request<SessionView>(`/api/sessions/${problemId}`),
+    request<SessionView>(`/api/sessions/${encodeURIComponent(problemId)}`),
+
+  authCheck: () =>
+    request<{ ok: boolean; passcode_required: boolean }>("/api/auth/check"),
+
+  observerStatus: () => request<ObserverStatus>("/api/observer/status"),
+
+  /** One downscaled frame -> local VLM. Returns the updated session view. */
+  observe: (
+    problemId: string,
+    imageB64: string,
+    trigger: string,
+    codeRevision: number,
+  ) =>
+    request<SessionView>("/api/sessions/observe", {
+      method: "POST",
+      body: JSON.stringify({
+        problem_id: problemId,
+        image_b64: imageB64,
+        trigger,
+        code_revision: codeRevision,
+      }),
+    }),
 };
+
+export const PASSCODE_EVENT = "logistream:passcode-required";
 
 export { GATEWAY };

@@ -1,0 +1,215 @@
+"use client";
+
+// Screen observer, browser side (CLAUDE_CODE_BRIEF step 5).
+//
+// What it does, and the guarantees it keeps:
+//   * starts ONLY from a user click, through the browser's own getDisplayMedia
+//     picker -- the student chooses the window (their IDE or terminal)
+//   * state is the real capture state: if the student stops sharing from the
+//     browser's own bar, the track ends and this goes back to "off"
+//   * frames are downscaled here (max 1600 px wide, JPEG) and sampled about
+//     every 15 s plus on Run/error; near-identical frames are skipped
+//   * one frame in flight at a time; nothing is stored in the browser
+//   * frames go to the gateway -> orchestrator -> LOCAL Ollama, and only a short
+//     text observation comes back. "observer unavailable" never stops tutoring.
+
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+
+import { ApiError, api } from "./api";
+import type { SessionView } from "./types";
+
+export type CaptureState = "off" | "starting" | "on" | "paused";
+
+const SAMPLE_MS = 15_000;
+// 1600 px: at 1024 the vision model misreads small editor text (arr[0] -> 0)
+const MAX_WIDTH = 1600;
+const JPEG_QUALITY = 0.7;
+// mean absolute difference on a 160x90 grey thumbnail, 0..255. Fine enough that
+// deleting one line of code counts as a change (a 32x18 thumbnail missed it)
+const THUMB_W = 160;
+const THUMB_H = 90;
+const SAME_FRAME_THRESHOLD = 0.4;
+// even an unchanged screen is looked at again after this long
+const MAX_SKIP_MS = 45_000;
+
+function thumb(video: HTMLVideoElement): Uint8Array | null {
+  const c = document.createElement("canvas");
+  c.width = THUMB_W;
+  c.height = THUMB_H;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(video, 0, 0, THUMB_W, THUMB_H);
+  const d = ctx.getImageData(0, 0, THUMB_W, THUMB_H).data;
+  const g = new Uint8Array(THUMB_W * THUMB_H);
+  for (let i = 0; i < g.length; i++) g[i] = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3;
+  return g;
+}
+
+function difference(a: Uint8Array, b: Uint8Array): number {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+  return s / a.length;
+}
+
+function frameB64(video: HTMLVideoElement): string | null {
+  const w = video.videoWidth;
+  const h = video.videoHeight;
+  if (!w || !h) return null;
+  const scale = Math.min(1, MAX_WIDTH / w);
+  const c = document.createElement("canvas");
+  c.width = Math.round(w * scale);
+  c.height = Math.round(h * scale);
+  const ctx = c.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(video, 0, 0, c.width, c.height);
+  const url = c.toDataURL("image/jpeg", JPEG_QUALITY);
+  return url.slice(url.indexOf(",") + 1);
+}
+
+/**
+ * Which session the frames go to right now. The capture itself lives above the
+ * session (in the page), so switching problems re-points it instead of ending
+ * the share; null while no session is mounted, and no frame is sent then.
+ */
+export interface ObserverBinding {
+  problemId: string;
+  codeRevision: number;
+  /** false while a tutor turn is running: an observation would only be skipped */
+  canSend: boolean;
+  onView: (v: SessionView) => void;
+}
+
+export function useScreenObserver(binding: RefObject<ObserverBinding | null>) {
+  const [state, setState] = useState<CaptureState>("off");
+  const [status, setStatus] = useState<string>("observer off");
+  const [unavailable, setUnavailable] = useState(false);
+  const [lastObservedAt, setLastObservedAt] = useState<number | null>(null);
+
+  const streamRef = useRef<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const lastThumb = useRef<Uint8Array | null>(null);
+  const inFlight = useRef(false);
+  const lastSentAt = useRef(0);
+  const stateRef = useRef<CaptureState>("off");
+
+  const set = (s: CaptureState) => {
+    stateRef.current = s;
+    setState(s);
+  };
+
+  const stop = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    videoRef.current = null;
+    lastThumb.current = null;
+    set("off");
+    setStatus("observer off");
+  }, []);
+
+  /**
+   * Look at the screen once. "ask" is the student's question about to be sent:
+   * it waits for a frame already in flight, then always takes a fresh one, so
+   * the tutor never answers about code that has since changed. Resolves when
+   * the observation is in the session (or could not be made).
+   */
+  const sample = useCallback(
+    async (trigger: "interval" | "run" | "error" | "manual" | "ask"): Promise<void> => {
+      const fresh = trigger === "ask";
+      if (fresh) {
+        for (let i = 0; inFlight.current && i < 120; i++) await new Promise((r) => setTimeout(r, 500));
+      }
+      const video = videoRef.current;
+      const target = binding.current;
+      if (stateRef.current !== "on" || !video || inFlight.current || !target) return;
+      if (!fresh && !target.canSend) return;
+      const t = thumb(video);
+      if (t && lastThumb.current && trigger === "interval" &&
+          Date.now() - lastSentAt.current < MAX_SKIP_MS &&
+          difference(t, lastThumb.current) < SAME_FRAME_THRESHOLD) {
+        return; // nothing changed on screen; save the GPU
+      }
+      const b64 = frameB64(video);
+      if (!b64) return;
+      inFlight.current = true;
+      lastSentAt.current = Date.now();
+      setStatus("looking at your screen…");
+      try {
+        const v = await api.observe(target.problemId, b64, trigger, target.codeRevision);
+        lastThumb.current = t;
+        setUnavailable(false);
+        setLastObservedAt(Date.now());
+        setStatus("observer on");
+        // the student may have switched problems while the model was looking
+        if (binding.current?.problemId === target.problemId) binding.current.onView(v);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 503) {
+          setUnavailable(true);
+          setStatus(e.message);
+        } else if (e instanceof ApiError && (e.status === 409 || e.status === 429)) {
+          setStatus("observer on (skipped a busy moment)");
+        } else {
+          setStatus(e instanceof ApiError ? e.message : String(e));
+        }
+      } finally {
+        inFlight.current = false;
+      }
+    },
+    [binding],
+  );
+
+  const start = useCallback(async () => {
+    if (stateRef.current !== "off") return;
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setStatus("this browser cannot share a screen");
+      return;
+    }
+    set("starting");
+    setStatus("choose the window to share…");
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 1 },
+        audio: false,
+      });
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      await video.play();
+      streamRef.current = stream;
+      videoRef.current = video;
+      // the student can stop sharing from the browser's own bar
+      stream.getVideoTracks()[0]?.addEventListener("ended", stop);
+      set("on");
+      setStatus("observer on");
+      setTimeout(() => sample("manual"), 500);
+    } catch {
+      set("off");
+      setStatus("screen sharing was cancelled");
+    }
+  }, [sample, stop]);
+
+  const pause = useCallback(() => {
+    if (stateRef.current === "on") {
+      set("paused");
+      setStatus("observer paused");
+    }
+  }, []);
+
+  const resume = useCallback(() => {
+    if (stateRef.current === "paused" && streamRef.current) {
+      set("on");
+      setStatus("observer on");
+    }
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => sample("interval"), SAMPLE_MS);
+    return () => clearInterval(id);
+  }, [sample]);
+
+  // never leave a capture running after the page goes away
+  useEffect(() => stop, [stop]);
+
+  return { state, status, unavailable, lastObservedAt, start, stop, pause, resume, sample };
+}

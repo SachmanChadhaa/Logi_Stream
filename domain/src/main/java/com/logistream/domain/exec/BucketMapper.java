@@ -21,6 +21,12 @@ public final class BucketMapper {
     public static final String COMPILE_ERROR = "COMPILE_ERROR";
     public static final String RUNTIME_ERROR = "RUNTIME_ERROR";
     public static final String INFRA_ERROR = "INFRA_ERROR";
+    /**
+     * Bring-your-own-problem with no tests: the program ran to completion, but
+     * there was nothing to compare its output against. Deliberately NOT
+     * ACCEPTED -- "it ran" is not "it is correct", and the tutor and UI say so.
+     */
+    public static final String NO_TESTS = "NO_TESTS";
 
     /** One test's result paired with whether its stdout matched. */
     public record Scored(Result result, boolean outputMatched) {
@@ -85,6 +91,24 @@ public final class BucketMapper {
         }
         // an unmapped status id: treat as infra rather than silently passing
         return INFRA_ERROR;
+    }
+
+    /**
+     * Bucket for a smoke run of a problem that has no tests. Errors map exactly
+     * as they would with tests; a clean run becomes NO_TESTS instead of ACCEPTED.
+     */
+    public static String bucketOfUnverified(Result smokeRun, boolean timedOut) {
+        String b = bucketOf(List.of(new Scored(smokeRun, true)), timedOut);
+        return ACCEPTED.equals(b) ? NO_TESTS : b;
+    }
+
+    /**
+     * Per-test status text. The sandbox reports "Accepted" for any clean exit;
+     * status 3 with mismatched output is a Wrong Answer (section 8), so say so
+     * instead of showing (and prompting the tutor with) "Accepted" on a failure.
+     */
+    public static String displayStatus(Result r, boolean matched) {
+        return r.statusId() == 3 && !matched ? "Wrong Answer" : r.statusDescription();
     }
 
     /** Java compares stdout itself; Judge0 never sees expected_output (section 8). */

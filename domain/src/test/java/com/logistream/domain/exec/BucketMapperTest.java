@@ -138,4 +138,32 @@ class BucketMapperTest {
     void emptyBatch() {
         assertEquals(BucketMapper.INFRA_ERROR, BucketMapper.bucketOf(List.of(), false));
     }
+
+    // ------------------------------------------------ bring your own problem
+
+    @Test
+    @DisplayName("no tests: a clean run is NO_TESTS, never ACCEPTED")
+    void noTestsCleanRunIsNotAccepted() {
+        assertEquals(BucketMapper.NO_TESTS,
+                BucketMapper.bucketOfUnverified(r(3, "hello", ""), false));
+    }
+
+    @Test
+    @DisplayName("no tests: errors still map exactly as with tests")
+    void noTestsErrorsStillMap() {
+        assertEquals(BucketMapper.COMPILE_ERROR, BucketMapper.bucketOfUnverified(
+                r(11, "", "SyntaxError: invalid syntax"), false));
+        assertEquals(BucketMapper.RUNTIME_ERROR, BucketMapper.bucketOfUnverified(
+                r(11, "", "ZeroDivisionError: division by zero"), false));
+        assertEquals(BucketMapper.TLE, BucketMapper.bucketOfUnverified(r(5, "", ""), false));
+        assertEquals(BucketMapper.INFRA_ERROR, BucketMapper.bucketOfUnverified(r(13, "", ""), false));
+    }
+
+    @Test
+    @DisplayName("a clean exit with the wrong output is shown as Wrong Answer, not Accepted")
+    void wrongOutputIsNotLabelledAccepted() {
+        assertEquals("Wrong Answer", BucketMapper.displayStatus(r(3, "4", ""), false));
+        assertEquals("desc", BucketMapper.displayStatus(r(3, "9", ""), true));
+        assertEquals("desc", BucketMapper.displayStatus(r(5, "", ""), false));
+    }
 }

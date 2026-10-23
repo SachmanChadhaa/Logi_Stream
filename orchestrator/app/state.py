@@ -13,6 +13,10 @@ import operator
 from typing import Annotated, Any, Literal, TypedDict
 
 Phase = Literal["LOGIC", "CODE", "DONE"]
+# curated: a seeded problem with a rubric, so the logic gate applies (two-sum).
+# custom:  bring-your-own-problem. No rubric exists, so there is no logic gate:
+#          the session starts in CODE with the editor open and the tutor ready.
+ProblemKind = Literal["curated", "custom"]
 Status = Literal["LOGIC_WRITE", "LOGIC_CHAT", "CODE_WRITE", "CODE_CHAT", "SUCCESS"]
 EventType = Literal["logic", "chat", "code"]
 
@@ -21,6 +25,7 @@ class SessionState(TypedDict, total=False):
     problem_id: str
     user_id: str
     thread_id: str
+    problem_kind: ProblemKind
 
     phase: Phase
     status: Status
@@ -33,6 +38,13 @@ class SessionState(TypedDict, total=False):
 
     last_eval: dict[str, Any] | None
     last_execution: dict[str, Any] | None     # full Java detail, Python-side only
+    last_diagnosis: dict[str, Any] | None     # diagnostics.rank() of the last run
+    # Temporal memory: one compact record per run (diagnostics.history_entry),
+    # newest last, capped. Lets the tutor say what changed since the last run.
+    run_history: list[dict[str, Any]]
+    # Rolling summary + last ~20 events + GRU hidden state (app/temporal.py).
+    # Text only: a screenshot never enters state or a checkpoint.
+    temporal: dict[str, Any]
 
     attempts: dict[str, int]                  # {"logic": int, "code": int}
 
@@ -47,20 +59,38 @@ class SessionState(TypedDict, total=False):
     messages: Annotated[list[dict[str, Any]], operator.add]
 
 
-def initial_state(problem_id: str, user_id: str, thread_id: str) -> SessionState:
+def _empty_temporal() -> dict[str, Any]:
+    from app import temporal   # local import: temporal imports nothing from here
+    return temporal.empty()
+
+
+def initial_state(
+    problem_id: str,
+    user_id: str,
+    thread_id: str,
+    *,
+    kind: ProblemKind = "curated",
+    starter_code: str = "",
+) -> SessionState:
+    custom = kind == "custom"
     return {
         "problem_id": problem_id,
         "user_id": user_id,
         "thread_id": thread_id,
-        "phase": "LOGIC",
-        "status": "LOGIC_WRITE",
+        "problem_kind": kind,
+        "phase": "CODE" if custom else "LOGIC",
+        "status": "CODE_WRITE" if custom else "LOGIC_WRITE",
         "pending_event": None,
         "user_logic": "",
-        "user_code": "",
+        # a custom problem may arrive with the student's current attempt
+        "user_code": starter_code if custom else "",
         "accepted_logic": None,
         "logic_summary": None,
         "last_eval": None,
         "last_execution": None,
+        "last_diagnosis": None,
+        "run_history": [],
+        "temporal": _empty_temporal(),
         "attempts": {"logic": 0, "code": 0},
         "draft": None,
         "regenerations": 0,
