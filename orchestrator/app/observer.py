@@ -72,8 +72,8 @@ Return JSON only:
  "error_text": "the visible error message, verbatim, max 120 chars, or empty",
  "problem_title": "the title of the coding problem shown on screen, verbatim, or empty if none is visible",
  "problem_statement": "that problem's visible statement, examples and constraints, copied verbatim, max 600 characters, or empty",
- "code": "the code visible in the code editor, copied EXACTLY line by line with its indentation (keep mistakes and duplicate lines as they are), max 1500 characters, or empty",
- "code_language": "the programming language of that code (e.g. C, C++, Java, Python), or empty",
+ "code_visible": true | false,
+ "code_language": "the programming language of the code in the editor (e.g. C, C++, Java, Python), or empty",
  "summary": "what the student appears to be doing, max 30 words"}"""
 
 
@@ -118,6 +118,11 @@ def decode_frame(image_b64: str) -> bytes:
 def parse_reply(content: str) -> dict[str, Any]:
     """Model JSON -> {text, tags}. Tolerant of fences; never invents an error."""
     s = (content or "").strip()
+    if not s or set(s) <= set("@!#"):
+        # seen on this laptop's GPU: after a driver fault every answer is empty
+        # or a run of '@'. Say what it is instead of a cryptic parse error.
+        raise ObserverUnavailable("the vision model is returning garbage (a GPU fault); "
+                                  "restart Ollama, or the laptop if that does not help")
     if s.startswith("```"):
         s = s.strip("`")
         s = s[s.find("{"):] if "{" in s else s
@@ -134,11 +139,12 @@ def parse_reply(content: str) -> dict[str, Any]:
     title = " ".join(str(d.get("problem_title") or "").split())[:MAX_PROBLEM_TITLE]
     statement = str(d.get("problem_statement") or "").strip()[:MAX_PROBLEM_STATEMENT]
     problem = {"title": title, "statement": statement} if title else None
-    # code typed OUTSIDE this app (another editor or a practice site). Never
-    # executed; the tutor may only reason about it as a hypothesis.
-    code_text = str(d.get("code") or "").rstrip()[:MAX_SCREEN_CODE]
-    code = ({"text": code_text, "language": " ".join(str(d.get("code_language") or "").split())[:20]}
-            if code_text.strip() else None)
+    # code typed OUTSIDE this app (another editor or a practice site). Its text
+    # comes from the separate copy-only call (interpret); never executed, the
+    # tutor may only reason about it as a hypothesis.
+    code_visible = d.get("code_visible") in (True, "true", "yes")
+    code = ({"text": "", "language": " ".join(str(d.get("code_language") or "").split())[:20]}
+            if code_visible else None)
     text = summary + (f" Error visible on screen: {error_text}" if error_visible else "")
     if problem:
         text = f"{text} Problem on screen: {title}."
@@ -164,7 +170,12 @@ def interpret(image_b64: str) -> dict[str, Any]:
     image = base64.b64encode(raw).decode("ascii")
     del raw
     try:
-        r = _ask(PROMPT, image, json_mode=True, num_predict=900)
+        r = _ask(PROMPT, image, json_mode=True, num_predict=500)
+        if r.status_code == 500 and "grammar" in r.text:
+            # llama.cpp's JSON grammar can abort mid-answer; the parser below
+            # tolerates free text, so ask once more without the grammar
+            log.warning("observer: JSON mode failed (%s); retrying without it", r.text[:120])
+            r = _ask(PROMPT, image, json_mode=False, num_predict=500)
         transcript = None
         if r.status_code == 200:
             try:
@@ -196,8 +207,11 @@ def interpret(image_b64: str) -> dict[str, Any]:
         raise ObserverUnavailable("unexpected Ollama response shape") from e
 
     out = parse_reply(content)
-    if out.get("code") and transcript:
-        out["code"]["text"] = transcript       # the faithful copy wins over the tidied one
+    if out.get("code"):
+        if transcript:
+            out["code"]["text"] = transcript
+        else:
+            out["code"] = None                  # said "code visible" but nothing could be copied
     out["model"] = OLLAMA_VLM_MODEL
     out["latency_ms"] = int((time.monotonic() - t0) * 1000)
     log.info("observer: %d ms, tags=%s", out["latency_ms"], out["tags"])

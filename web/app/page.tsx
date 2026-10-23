@@ -25,7 +25,7 @@ function readProblemParam(): string | null {
   return new URLSearchParams(window.location.search).get("problem");
 }
 
-type BusyKind = "logic" | "chat" | "code" | "reset" | "load" | null;
+type BusyKind = "logic" | "chat" | "code" | "reset" | "load" | "look" | null;
 
 const CAPTURE_STILL_ON = "Screen capture is still on. Stop it from the header when you are done.";
 
@@ -35,6 +35,7 @@ const BUSY_LABEL: Record<Exclude<BusyKind, null>, string> = {
   code: "Running tests in the sandbox…",
   reset: "Resetting the session…",
   load: "Loading your session…",
+  look: "Looking at your screen first…",
 };
 
 /**
@@ -191,8 +192,14 @@ function Session({
   const send = useCallback(
     async (kind: "logic" | "chat" | "code", text: string) => {
       if (!text.trim()) return;
-      begin(kind);
       try {
+        // sharing: look at the screen right now, so the answer is about the
+        // code as it is, not as it was at the last 15 s sample
+        if (kind === "chat" && observer.state === "on") {
+          begin("look");
+          await observer.sample("ask");
+        }
+        begin(kind);
         setView(await api.event(problemId, kind, text));
       } catch (e) {
         fail(e);
@@ -200,7 +207,7 @@ function Session({
         setBusy(null);
       }
     },
-    [problemId],
+    [problemId, observer],
   );
 
   const onReset = useCallback(async () => {

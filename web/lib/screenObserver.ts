@@ -24,18 +24,23 @@ const SAMPLE_MS = 15_000;
 // 1600 px: at 1024 the vision model misreads small editor text (arr[0] -> 0)
 const MAX_WIDTH = 1600;
 const JPEG_QUALITY = 0.7;
-// mean absolute difference on a 32x18 grey thumbnail, 0..255
-const SAME_FRAME_THRESHOLD = 2.5;
+// mean absolute difference on a 160x90 grey thumbnail, 0..255. Fine enough that
+// deleting one line of code counts as a change (a 32x18 thumbnail missed it)
+const THUMB_W = 160;
+const THUMB_H = 90;
+const SAME_FRAME_THRESHOLD = 0.4;
+// even an unchanged screen is looked at again after this long
+const MAX_SKIP_MS = 45_000;
 
 function thumb(video: HTMLVideoElement): Uint8Array | null {
   const c = document.createElement("canvas");
-  c.width = 32;
-  c.height = 18;
+  c.width = THUMB_W;
+  c.height = THUMB_H;
   const ctx = c.getContext("2d", { willReadFrequently: true });
   if (!ctx) return null;
-  ctx.drawImage(video, 0, 0, 32, 18);
-  const d = ctx.getImageData(0, 0, 32, 18).data;
-  const g = new Uint8Array(32 * 18);
+  ctx.drawImage(video, 0, 0, THUMB_W, THUMB_H);
+  const d = ctx.getImageData(0, 0, THUMB_W, THUMB_H).data;
+  const g = new Uint8Array(THUMB_W * THUMB_H);
   for (let i = 0; i < g.length; i++) g[i] = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3;
   return g;
 }
@@ -84,6 +89,7 @@ export function useScreenObserver(binding: RefObject<ObserverBinding | null>) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const lastThumb = useRef<Uint8Array | null>(null);
   const inFlight = useRef(false);
+  const lastSentAt = useRef(0);
   const stateRef = useRef<CaptureState>("off");
 
   const set = (s: CaptureState) => {
@@ -101,19 +107,32 @@ export function useScreenObserver(binding: RefObject<ObserverBinding | null>) {
     setStatus("observer off");
   }, []);
 
+  /**
+   * Look at the screen once. "ask" is the student's question about to be sent:
+   * it waits for a frame already in flight, then always takes a fresh one, so
+   * the tutor never answers about code that has since changed. Resolves when
+   * the observation is in the session (or could not be made).
+   */
   const sample = useCallback(
-    async (trigger: "interval" | "run" | "error" | "manual") => {
+    async (trigger: "interval" | "run" | "error" | "manual" | "ask"): Promise<void> => {
+      const fresh = trigger === "ask";
+      if (fresh) {
+        for (let i = 0; inFlight.current && i < 120; i++) await new Promise((r) => setTimeout(r, 500));
+      }
       const video = videoRef.current;
       const target = binding.current;
-      if (stateRef.current !== "on" || !video || inFlight.current || !target?.canSend) return;
+      if (stateRef.current !== "on" || !video || inFlight.current || !target) return;
+      if (!fresh && !target.canSend) return;
       const t = thumb(video);
       if (t && lastThumb.current && trigger === "interval" &&
+          Date.now() - lastSentAt.current < MAX_SKIP_MS &&
           difference(t, lastThumb.current) < SAME_FRAME_THRESHOLD) {
         return; // nothing changed on screen; save the GPU
       }
       const b64 = frameB64(video);
       if (!b64) return;
       inFlight.current = true;
+      lastSentAt.current = Date.now();
       setStatus("looking at your screen…");
       try {
         const v = await api.observe(target.problemId, b64, trigger, target.codeRevision);

@@ -314,12 +314,12 @@ def test_screen_problem_is_offered_kept_and_cleared(g):
 GFG_CODE = "int largest(int arr[], int n) {\n    int max = arr[0];\n    int max = arr[0];\n    return max;\n}"
 
 
-def test_parse_reply_keeps_code_on_screen():
+def test_parse_reply_flags_code_on_screen():
     r = observer.parse_reply(json.dumps({"activity": "browser", "error_visible": False, "error_text": "",
                                          "problem_title": "", "problem_statement": "",
-                                         "code": GFG_CODE, "code_language": "C", "summary": "writing C"}))
-    assert r["code"] == {"text": GFG_CODE, "language": "C"}
-    r = observer.parse_reply('{"activity":"editing","error_visible":false,"error_text":"","code":"  ","summary":"x"}')
+                                         "code_visible": True, "code_language": "C", "summary": "writing C"}))
+    assert r["code"] == {"text": "", "language": "C"}, "the text comes from the copy-only call"
+    r = observer.parse_reply('{"activity":"editing","error_visible":false,"error_text":"","code_visible":false,"summary":"x"}')
     assert r["code"] is None
 
 
@@ -372,3 +372,9 @@ def test_nothing_run_means_nothing_verified(monkeypatch):
     out = verify_code({"problem_id": "custom-x", "draft": "Verified: line 3 declares max again. Why?",
                        "user_code": "", "messages": [], "node_path": [], "last_execution": None})
     assert out["messages"][0]["text"] == "Hypothesis (not run): line 3 declares max again. Why?"
+
+
+def test_gpu_garbage_is_named_not_parsed():
+    for junk in ("", "@@@@@@@@@@@@"):
+        with pytest.raises(observer.ObserverUnavailable, match="GPU fault"):
+            observer.parse_reply(junk)
