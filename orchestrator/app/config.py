@@ -35,7 +35,9 @@ LLM_API_KEY = (
 )
 LLM_MODEL_EVALUATOR = os.environ.get("LLM_MODEL_EVALUATOR", "logistream-evaluator")
 LLM_MODEL_TUTOR = os.environ.get("LLM_MODEL_TUTOR", "logistream-tutor")
-LLM_TIMEOUT_S = _float("LLM_TIMEOUT_S", 90.0)
+LLM_TIMEOUT_S = _float("LLM_TIMEOUT_S", 150.0)   # cold local model after a VLM swap: ~76 s
+# Reasoning ("thinking") on local models: off unless LLM_THINK=1.
+LLM_THINK = os.environ.get("LLM_THINK", "0").lower() in ("1", "true", "yes")
 
 # --- graph behaviour -------------------------------------------------------
 FLAG_CONFIDENCE_THRESHOLD = _float("FLAG_CONFIDENCE_THRESHOLD", 0.6)

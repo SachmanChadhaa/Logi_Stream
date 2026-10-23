@@ -593,9 +593,12 @@ async fn main() {
 
     let state = AppState {
         // reqwest has NO overall timeout unless you set one (trap 8). A tutor
-        // turn on the free tier has been measured at over 90s, so 120s it is.
+        // turn has been measured past 90 s (free tier) and ~85 s (local model
+        // reloading after a vision-model swap), so the default is 170 s.
         http: reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(
+                env_or("GATEWAY_UPSTREAM_TIMEOUT_S", "170").parse().unwrap_or(170),
+            ))
             .build()
             .expect("failed to build http client"),
         orchestrator_url: env_or("ORCHESTRATOR_URL", "http://localhost:8001"),

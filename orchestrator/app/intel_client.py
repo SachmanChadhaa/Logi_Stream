@@ -20,7 +20,7 @@ from app import config, features_v1
 
 log = logging.getLogger(__name__)
 
-INTEL_URL = os.environ.get("INTEL_URL", "http://localhost:8002")
+INTEL_URL = os.environ.get("INTEL_URL", "http://127.0.0.1:8003")
 INTEL_TIMEOUT_S = float(os.environ.get("INTEL_TIMEOUT_S", "2.0"))
 INTEL_ENABLED = os.environ.get("INTEL_ENABLED", "1") not in ("0", "false", "no")
 
