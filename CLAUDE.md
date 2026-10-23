@@ -1,5 +1,10 @@
 # CLAUDE.md — LogiStream 3-Day MVP
 
+> **Update 2026-10-24 (owner decision):** the hosted Judge0 integration has been removed; all
+> execution is the local Python sandbox (`LocalPythonSandbox`). Sections below that describe
+> Judge0 are the original MVP contract, kept for history. The current system is described in
+> `README.md` and `docs/BYOP.md`.
+
 > \\\*\\\*For the human:\\\*\\\* put this file at the repo root. Claude Code loads `CLAUDE.md`
 > automatically at the start of every session. Drive it day by day:
 >

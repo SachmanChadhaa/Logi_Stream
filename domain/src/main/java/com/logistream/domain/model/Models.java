@@ -36,7 +36,10 @@ public final class Models {
             String kind,
             String ownerId,
             String language,
-            String constraintsText) {
+            String constraintsText,
+            String source,
+            String sourceSite,
+            JsonNode insights) {
 
         public boolean isCustom() {
             return KIND_CUSTOM.equals(kind);
@@ -75,7 +78,11 @@ public final class Models {
             String language,
             String kind,
             String constraints,
-            int test_count) {
+            int test_count,
+            String source,
+            String source_site,
+            JsonNode insights,
+            int snapshot_count) {
     }
 
     /** One entry of GET /internal/problems: enough to render a picker. */
@@ -109,7 +116,14 @@ public final class Models {
             List<ExampleInput> examples,
             String starter_code,
             String language,
-            List<TestInput> tests) {
+            List<TestInput> tests,
+            String source,
+            String source_site,
+            JsonNode insights) {
+    }
+
+    /** POST /internal/problems/{id}/snapshots: code the agent saw on screen. */
+    public record SnapshotRequest(String code, String language) {
     }
 
     // ----------------------------------------------------------- internal API
@@ -125,7 +139,9 @@ public final class Models {
             String kind,
             String constraints,
             JsonNode examples,
-            String language) {
+            String language,
+            String source,
+            JsonNode insights) {
     }
 
     /** POST /internal/execute request. */

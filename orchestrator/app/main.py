@@ -19,7 +19,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from langgraph.types import Command
 from pydantic import BaseModel
 
-from app import config, domain_client, llm, observer, tracing
+from app import config, domain_client, llm, observer, screen_problems, tracing
 from app.checkpointer import build_checkpointer, close_checkpointer
 from app.graph import build_graph
 from app.state import initial_state
@@ -89,6 +89,10 @@ class ObserveBody(BaseModel):
     image_b64: str
     trigger: str | None = None          # "interval" | "run" | "error" | "manual"
     code_revision: int | None = None    # the run revision the browser had when it captured
+
+
+class FromScreenBody(BaseModel):
+    thread_id: str                      # the session that saw the problem (gateway-derived)
 
 
 # One graph turn per thread at a time. Two concurrent invokes on the same
@@ -221,6 +225,28 @@ def observe(thread_id: str, body: ObserveBody) -> dict[str, Any]:
     log.info("observe: thread=%s trigger=%s rev=%d latency=%dms",
              thread_id, body.trigger, rev, obs["latency_ms"])
     return _view(g, cfg, thread_id)
+
+
+@app.post("/problems/from-screen", dependencies=[Depends(require_token)])
+def problem_from_screen(body: FromScreenBody, x_user_id: str | None = Header(default=None)) -> dict[str, Any]:
+    """The student said "tutor me on this" about a problem the observer read off
+    their screen. The problem comes from that session's own memory -- never
+    from the browser -- is analysed in depth, stored, and its id returned.
+    """
+    if not x_user_id:
+        raise HTTPException(status_code=400, detail="X-User-Id is required")
+    values = graph().get_state({"configurable": {"thread_id": body.thread_id}}).values
+    if not values:
+        raise HTTPException(status_code=404, detail="no such session")
+    if values.get("user_id") and values["user_id"] != x_user_id:
+        raise HTTPException(status_code=404, detail="no such session")
+    t = values.get("temporal") or {}
+    problem = t.get("screen_problem")
+    if not problem or not problem.get("title"):
+        raise HTTPException(status_code=409, detail="no other problem has been seen on your screen")
+    out = screen_problems.open_or_create(x_user_id, problem, t.get("screen_code"),
+                                         trace_id=tracing.get_trace_id())
+    return out
 
 
 @app.post("/sessions/{thread_id}/reset", dependencies=[Depends(require_token)])

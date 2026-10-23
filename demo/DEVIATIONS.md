@@ -23,7 +23,7 @@ Everything below was cut to protect that, and each cut leaves a named seam.
 | 7 | Deterministic **and** LLM-judge verifier | Deterministic verifier only | The judge is an extra check in the same node. |
 | 8 | Multi-language submissions | Python only | `language` is already a request field, validated and rejected for anything else. |
 | 9 | Spring Data JPA | Spring `JdbcTemplate` | Repository layer only. Avoids jsonb mapping pain. |
-| 10 | Self-hosted Judge0 | **Local subprocess sandbox** | `Sandbox` is an interface. `EXECUTOR_MODE=JUDGE0` swaps the hosted client back in; it is still compiled and unit-tested. |
+| 10 | Self-hosted Judge0 | **Local subprocess sandbox** | `Sandbox` is an interface. The hosted Judge0 client was **removed on 2026-10-24** (owner decision); a container or remote sandbox would plug into the same interface. |
 | 11 | Offline CrewAI content pipeline | Hand-seeded Two Sum | The seed format **is** the pipeline's output format. |
 | 12 | Review queue / transcripts | `FLAGGED` verdicts are logged, not queued | The log line marks exactly where the queue goes. |
 | 13 | All services in docker-compose | Infra in compose; app services on the host | All URLs are environment variables. |

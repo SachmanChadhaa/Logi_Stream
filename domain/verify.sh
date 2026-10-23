@@ -144,18 +144,9 @@ fi
 # ------------------------------------------------------------ 3. execution
 
 echo
-echo "[execution: EXECUTOR_MODE=${EXECUTOR_MODE:-LOCAL}]"
+echo "[execution: local python sandbox]"
 
-EXECUTOR_MODE="${EXECUTOR_MODE:-LOCAL}"
-if [ "$EXECUTOR_MODE" = "JUDGE0" ] && [ -z "${JUDGE0_RAPIDAPI_KEY:-}" ]; then
-  echo "  EXECUTOR_MODE=JUDGE0 but JUDGE0_RAPIDAPI_KEY is not set."
-  echo "  The five execution checks are SKIPPED, not faked."
-  skipd "correct solution        -> ACCEPTED 5/5"
-  skipd "nested loop             -> TLE"
-  skipd "missing colon           -> COMPILE_ERROR"
-  skipd "unguarded lookup        -> RUNTIME_ERROR"
-  skipd "returns values          -> WRONG_ANSWER"
-else
+if true; then
   run_case() {  # run_case <label> <fixture> <expected-bucket> [expected-passed]
     local label="$1" fixture="$2" expected="$3" expect_passed="${4:-}"
     $PY - "$fixture" /tmp/ls_exec_req.json <<'PYEOF'

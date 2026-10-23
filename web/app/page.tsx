@@ -242,25 +242,17 @@ function Session({
   }, [binding]);
 
   // the observer read a different problem off the screen and the student said
-  // "tutor me on this": reuse their problem with that title, or create it
-  const switchToScreenProblem = useCallback(async (sp: ScreenProblem) => {
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  // "tutor me on this": the server takes it from this session's memory,
+  // analyses it in depth (examples, complexity, signature, test inputs),
+  // stores it -- or reopens the one with that title -- and returns its id
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const switchToScreenProblem = useCallback(async (_sp: ScreenProblem) => {
     try {
-      const existing = (await api.listProblems()).problems.find(
-        (p) => p.kind === "custom" && norm(p.title) === norm(sp.title),
-      );
-      const id = existing
-        ? existing.id
-        : (await api.createProblem({
-            title: sp.title.slice(0, 120),
-            statement: sp.statement.trim() || sp.title,
-            language: "python",
-          })).id;
-      onOpen(id);
+      onOpen((await api.problemFromScreen(problemId)).id);
     } catch (e) {
       fail(e);
     }
-  }, [onOpen]);
+  }, [onOpen, problemId]);
 
   // after a run, look at the screen once more (the run may have changed what
   // the student sees) -- a tick later, once the busy flag has cleared

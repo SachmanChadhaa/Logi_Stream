@@ -169,8 +169,14 @@ def diagnose(state: SessionState) -> dict[str, Any]:
         t["screen_problem"] = _screen_problem(state, obs.get("problem"), t.get("screen_problem"))
         if (obs.get("code") or {}).get("text"):
             # the newest code seen wins; a frame without code keeps the last one
+            before = (t.get("screen_code") or {}).get("text")
             t["screen_code"] = {"text": obs["code"]["text"], "language": obs["code"].get("language") or "",
                                 "ts": temporal.now_iso()}
+            # solving history: each new version of THIS problem's code goes to
+            # the database (not while the screen shows some other problem)
+            if obs["code"]["text"] != before and kind == "custom" and not t.get("screen_problem"):
+                domain_client.add_snapshot(state["problem_id"], state.get("user_id") or "",
+                                           obs["code"]["text"], obs["code"].get("language") or "")
         log.info("diagnose observation rev=%d tags=%s", t["code_revision"], obs.get("tags"))
 
     else:  # chat
@@ -178,6 +184,12 @@ def diagnose(state: SessionState) -> dict[str, Any]:
                                    run_history=history, problem_kind=kind)
         _gru_step(t, vector)
         t = temporal.add_event(t, "chat", event.get("text", ""), "student")
+        # asking again about code that has not changed means the last answer
+        # did not help: count it, and the tutor gets one step more specific
+        code_now = state.get("user_code") or (t.get("screen_code") or {}).get("text") or ""
+        sha = diagnostics.code_sha(code_now)
+        review = t.get("review") or {"code_sha": None, "asks": 0}
+        t["review"] = {"code_sha": sha, "asks": review["asks"] + 1 if review["code_sha"] == sha else 1}
 
     t["summary"] = temporal.summarize(t, history)
     t["strategy"] = temporal.strategy(

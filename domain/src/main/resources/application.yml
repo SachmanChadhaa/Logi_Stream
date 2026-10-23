@@ -26,18 +26,9 @@ spring:
 logistream:
   internal-token: ${INTERNAL_TOKEN:dev-internal-token-change-me}
   executor:
-    # LOCAL runs student python in a subprocess on this host (default, free,
-    # needs no network). JUDGE0 swaps in the hosted Judge0 CE client instead.
-    # Both speak Judge0 status ids, so the section 8 bucket table is identical.
-    mode: ${EXECUTOR_MODE:LOCAL}
+    # student python runs in a subprocess on this host: free, offline, real
+    # errors. NOT a security sandbox (see LocalPythonSandbox).
     python: ${EXECUTOR_PYTHON:python}
-  judge0:
-    url: ${JUDGE0_URL:https://judge0-ce.p.rapidapi.com}
-    rapidapi-key: ${JUDGE0_RAPIDAPI_KEY:}
-    rapidapi-host: ${JUDGE0_RAPIDAPI_HOST:judge0-ce.p.rapidapi.com}
-    python-language-id: ${JUDGE0_PYTHON_LANGUAGE_ID:71}
-    poll-interval-ms: ${JUDGE0_POLL_INTERVAL_MS:1000}
-    max-polls: ${JUDGE0_MAX_POLLS:15}
 
 logging:
   level:

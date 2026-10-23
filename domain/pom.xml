@@ -15,7 +15,7 @@
   <artifactId>domain</artifactId>
   <version>0.1.0</version>
   <name>logistream-domain</name>
-  <description>LogiStream domain service: problems, rubric, Judge0 execution</description>
+  <description>LogiStream domain service: problems, rubric, local sandboxed execution</description>
 
   <properties>
     <java.version>21</java.version>

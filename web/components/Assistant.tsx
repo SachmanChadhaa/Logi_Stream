@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Activity, ArrowUp, CornerDownRight, Loader2, Mic, MicOff, MonitorOff, Paperclip, Pause, Play,
+  Activity, ArrowUp, CornerDownRight, FileCode2, Loader2, Mic, MicOff, MonitorOff, Paperclip, Pause, Play,
   Plus, Radio, ScanEye, ScreenShare, ShieldCheck, Sparkles, Square, Volume2, X,
 } from "lucide-react";
 
@@ -116,11 +116,16 @@ export function suggestions(view: SessionView | null): string[] {
   if (view?.phase === "LOGIC") {
     return ["Am I on the right track?", "Give me a small hint", "What should I think about first?"];
   }
-  if (!ex) return ["How should I start?", "What should my program read and print?", "Give me a small hint"];
+  if (!ex && view?.temporal?.screen_code) {
+    // they are writing code elsewhere and the agent can read it
+    return ["Review my current code", "Suggest test inputs", "What is the time complexity of my code?",
+            "Give me a small hint"];
+  }
+  if (!ex) return ["How should I start?", "What should my program read and print?", "Suggest test inputs"];
   if (ex.bucket === "NO_TESTS") {
     return ["How can I check my answer without tests?", "Which edge cases should I test?", "Give me a small hint"];
   }
-  if (ex.bucket === "ACCEPTED") return ["What edge case might I be missing?"];
+  if (ex.bucket === "ACCEPTED") return ["What edge case might I be missing?", "Suggest test inputs"];
   const failing = ex.tests.find((t) => !t.passed);
   return [
     failing ? `Why does my code fail on "${failing.label}"?` : "Why does my code fail?",
@@ -264,6 +269,7 @@ export function Assistant({
   if (!open) return null;
 
   const screenProblem = view?.temporal?.screen_problem ?? null;
+  const screenCode = view?.temporal?.screen_code ?? null;
   const offer = screenProblem && screenProblem.title !== dismissed && onSwitchProblem ? screenProblem : null;
   const live = observer.state === "on";
   const paused = observer.state === "paused";
@@ -362,6 +368,13 @@ export function Assistant({
       <div className={`flex shrink-0 flex-col items-center gap-2 ${offer ? "pt-3 pb-2" : "pt-4 pb-3"}`}>
         <SiriOrb state={orb} size={offer ? 56 : 92} />
         <span className="text-[11px] tracking-wide text-[var(--muted)]">{ORB_LABEL[orb]}</span>
+        {screenCode && (
+          <span className="flex items-center gap-1.5 text-[10.5px] text-[var(--faint)]" title={screenCode.text}>
+            <FileCode2 size={11} aria-hidden />
+            Reading your {screenCode.language || "code"} · {screenCode.text.split("\n").length} lines
+            · seen {ago(screenCode.ts)}
+          </span>
+        )}
       </div>
 
       <div
@@ -502,6 +515,11 @@ export function Assistant({
       {panel}
     </div>
   );
+}
+
+function ago(ts: string): string {
+  const s = Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 1000));
+  return s < 60 ? `${s}s ago` : `${Math.round(s / 60)} min ago`;
 }
 
 const ORB_LABEL: Record<OrbState, string> = {

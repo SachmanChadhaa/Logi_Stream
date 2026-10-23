@@ -8,7 +8,9 @@ Both go through the same verify_code gate.
 """
 from __future__ import annotations
 
+import difflib
 import logging
+import re
 from typing import Any
 
 from app import config, diagnostics, domain_client, llm, redact, temporal, verifier
@@ -66,10 +68,14 @@ def code_tutor(state: SessionState) -> dict[str, Any]:
             student_code=code,
             diagnosis=state.get("last_diagnosis") if execution else None,
             history_summary=diagnostics.describe_history(earlier, diagnostics.code_sha(code)),
-            hint_level=hint_level(history) if execution else 1,
+            # runs that hit the same cause, or questions about unchanged code,
+            # both mean "be more specific" -- whichever is further along wins
+            hint_level=max(hint_level(history) if execution else 1,
+                           min(3, ((state.get("temporal") or {}).get("review") or {}).get("asks", 1))),
             recent_messages=state.get("messages") or [],
             session_memory=temporal.for_prompt(state.get("temporal")),
             screen_code=(state.get("temporal") or {}).get("screen_code"),
+            insights=ctx.get("insights") or {},
             strategy=(state.get("temporal") or {}).get("strategy") or
                      ("point-to-evidence" if execution else "clarify-plan"),
         )
@@ -112,6 +118,32 @@ def code_tutor(state: SessionState) -> dict[str, Any]:
     return {"draft": draft, "node_path": node_path}
 
 
+def _norm(s: str) -> str:
+    return " ".join("".join(ch for ch in s.lower() if ch.isalnum() or ch.isspace()).split())
+
+
+def _closing_question(s: str) -> str:
+    """The last sentence ending in '?', normalised; '' when there is none."""
+    qs = re.findall(r"[^.?!\n]*\?", s)
+    return _norm(qs[-1]) if qs else ""
+
+
+def repeats(draft: str, last: str) -> str | None:
+    """Why the draft repeats the previous tutor reply, or None.
+
+    Word-for-word, a near-paraphrase, or the same closing question all count:
+    a student who asks again did not get what they needed from that reply."""
+    d, l = _norm(draft), _norm(last)
+    if d == l:
+        return "repeats the previous reply word for word"
+    if difflib.SequenceMatcher(None, d, l).ratio() > 0.85:
+        return "is a near-copy of the previous reply; say something new"
+    q = _closing_question(draft)
+    if q and q == _closing_question(last):
+        return "ends with the same question as the previous reply; ask a different, more specific one"
+    return None
+
+
 def verify_code(state: SessionState) -> dict[str, Any]:
     """Gate every code-phase tutor turn (section 6.4)."""
     ctx = domain_client.get_problem_context(state["problem_id"])
@@ -130,8 +162,9 @@ def verify_code(state: SessionState) -> dict[str, Any]:
     # a tutor that answers a new question with its last reply, word for word,
     # is not listening: send it back to write a real answer
     previous = [m["text"] for m in (state.get("messages") or []) if m.get("role") == "tutor"]
-    if result.ok and previous and " ".join(draft.split()) == " ".join(previous[-1].split()):
-        result = verifier.VerificationResult(False, [{"reason": "repeats the previous reply word for word"}])
+    repeat = repeats(draft, previous[-1]) if result.ok and previous else None
+    if repeat:
+        result = verifier.VerificationResult(False, [{"reason": repeat}])
     node_path = list(state.get("node_path") or []) + ["verify_code"]
     rejections = list(state.get("verifier_rejections") or [])
 

@@ -7,14 +7,12 @@ import java.util.List;
 /**
  * Where student code actually runs.
  *
- * <p>Two implementations exist. {@link LocalPythonSandbox} is the default and
- * runs the code in a subprocess on this host; {@link com.logistream.domain.judge0.Judge0Client}
- * talks to the hosted Judge0 CE API. Selected by {@code EXECUTOR_MODE}.
- *
- * <p>The seam is worth the ten lines: CLAUDE.md section 3 promised that moving
- * between sandboxes would touch only the execution layer, and it does. Both
- * implementations speak Judge0's status ids, so {@link BucketMapper} and the
- * whole section 8 table are identical either way.
+ * <p>One implementation: {@link LocalPythonSandbox} runs the code in a
+ * subprocess on this host. The hosted Judge0 client was removed (owner
+ * decision, 2026-10-24); this interface stays as the seam a container or
+ * remote sandbox would plug into. Results keep Judge0-style status ids because
+ * {@link BucketMapper} and the whole CLAUDE.md section 8 table are written
+ * against them.
  */
 public interface Sandbox {
 

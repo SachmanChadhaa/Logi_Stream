@@ -97,6 +97,43 @@ def execute(problem_id: str, source: str, *, trace_id: str | None = None) -> dic
     return r.json()
 
 
+def list_problems(user_id: str, *, trace_id: str | None = None) -> list[dict[str, Any]]:
+    """Curated samples plus this user's own problems (summaries)."""
+    url = f"{config.DOMAIN_URL}/internal/problems"
+    try:
+        r = httpx.get(url, headers=_headers(trace_id, user_id), timeout=20.0)
+    except httpx.HTTPError as e:
+        raise DomainError(f"cannot reach the domain service at {url}: {e}") from e
+    if r.status_code != 200:
+        raise DomainError(f"domain returned {r.status_code} for {url}: {r.text[:200]}")
+    return r.json().get("problems", [])
+
+
+def create_problem(user_id: str, body: dict[str, Any], *, trace_id: str | None = None) -> dict[str, Any]:
+    """Store a custom problem owned by user_id; returns Java's view (with id)."""
+    url = f"{config.DOMAIN_URL}/internal/problems"
+    try:
+        r = httpx.post(url, json=body, headers=_headers(trace_id, user_id), timeout=20.0)
+    except httpx.HTTPError as e:
+        raise DomainError(f"cannot reach the domain service at {url}: {e}") from e
+    if r.status_code != 201:
+        raise DomainError(f"domain returned {r.status_code} for {url}: {r.text[:200]}")
+    return r.json()
+
+
+def add_snapshot(problem_id: str, user_id: str, code: str, language: str,
+                 *, trace_id: str | None = None) -> bool:
+    """Record one version of the student's on-screen code. Best effort."""
+    url = f"{config.DOMAIN_URL}/internal/problems/{problem_id}/snapshots"
+    try:
+        r = httpx.post(url, json={"code": code, "language": language},
+                       headers=_headers(trace_id, user_id), timeout=10.0)
+        return r.status_code == 200 and bool(r.json().get("stored"))
+    except (httpx.HTTPError, ValueError) as e:
+        log.warning("snapshot not stored for %s: %s", problem_id, e)
+        return False
+
+
 def clear_cache() -> None:
     _context_cache.clear()
 

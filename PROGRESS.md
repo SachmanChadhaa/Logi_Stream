@@ -281,3 +281,16 @@ Full handoff: `docs/BYOP.md`. Branch `feature/bring-your-own-problem`, **local c
 | `gateway/verify.sh` | 20 passed, 0 failed |
 
 Measured: VLM 3.1–3.2 s/frame (2.9 GB, 100% GPU); text model 10 GB (42% CPU), tutor turn 12–28 s warm, ~66–85 s after a VLM swap.
+
+## 2026-10-24 — Judge0 removed, screen problems in depth, no repeat loops, README + Colab
+
+| Item | Status |
+|---|---|
+| Hosted Judge0 removed (Java package, config, env, smoke script, docs) | ✅ mvn 24 passed |
+| `app.problems` + `source`, `source_site`, `insights`; new `app.solve_snapshots` (idempotent migration) | ✅ applied on the live DB |
+| `/api/problems/from-screen`: LLM analysis (examples, constraints, signature, complexity, test inputs) + storage | ✅ pytest 135 |
+| Assistant: fresh look before questions, hint escalation on repeats, "already said", test-input suggestions, "reading your code" line | ✅ |
+| `README.md` (architecture, flows, data model, ML, API, running, tests) | ✅ |
+| `notebooks/LogiStream_GRU_XGBoost.ipynb` (+ generator) | ✅ executed locally |
+| Live vision on this laptop's GPU | ❌ GPU fault (`@@@@` replies); verified on CPU via `OLLAMA_VLM_NUM_GPU=0`; reboot needed |
+

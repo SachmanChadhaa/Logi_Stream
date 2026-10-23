@@ -4,12 +4,8 @@ import java.util.TimeZone;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-
-import com.logistream.domain.judge0.Judge0Properties;
 
 @SpringBootApplication
-@EnableConfigurationProperties(Judge0Properties.class)
 public class DomainApplication {
 
     static {

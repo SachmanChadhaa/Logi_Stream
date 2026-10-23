@@ -31,6 +31,9 @@ log = logging.getLogger(__name__)
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_VLM_MODEL = os.environ.get("OLLAMA_VLM_MODEL", "qwen2.5vl:3b")
 OLLAMA_TIMEOUT_S = float(os.environ.get("OLLAMA_TIMEOUT_S", "60"))
+# set to 0 to run the vision model on the CPU (slow, ~1-2 min a frame): the way
+# around a GPU driver fault, which on this laptop shows up as '@@@@' replies
+OLLAMA_VLM_NUM_GPU = os.environ.get("OLLAMA_VLM_NUM_GPU", "").strip()
 MAX_IMAGE_BYTES = 2_500_000
 MAX_TEXT = 300
 MAX_PROBLEM_TITLE = 120
@@ -226,6 +229,8 @@ def _ask(prompt: str, image_b64: str, *, json_mode: bool, num_predict: int) -> h
         "options": {"temperature": 0, "num_predict": num_predict},
         "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
     }
+    if OLLAMA_VLM_NUM_GPU:
+        body["options"]["num_gpu"] = int(OLLAMA_VLM_NUM_GPU)
     if json_mode:
         body["format"] = "json"
     return httpx.post(f"{OLLAMA_URL}/api/chat", timeout=OLLAMA_TIMEOUT_S, json=body)
