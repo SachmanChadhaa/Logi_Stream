@@ -55,6 +55,8 @@ def empty() -> dict[str, Any]:
         "screen_problem": None,
         # code the observer read off the screen (not this app's editor): {text, language, ts}
         "screen_code": None,
+        # how often the student asked about the SAME code: drives hint escalation
+        "review": {"code_sha": None, "asks": 0},
     }
 
 
@@ -175,6 +177,7 @@ def for_view(temporal: dict[str, Any] | None) -> dict[str, Any] | None:
         "student_state": t["student_state"],
         "screen_problem": t["screen_problem"],
         "screen_code": t["screen_code"],
+        "review": {"asks": (t.get("review") or {}).get("asks", 0)},
     }
 
 

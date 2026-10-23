@@ -159,6 +159,13 @@ export const api = {
       body: JSON.stringify(p),
     }),
 
+  /** "Tutor me on this": store the problem seen on screen during this session. */
+  problemFromScreen: (problemId: string) =>
+    request<{ id: string; reused: boolean }>("/api/problems/from-screen", {
+      method: "POST",
+      body: JSON.stringify({ problem_id: problemId }),
+    }),
+
   start: (problemId: string) =>
     request<SessionView>("/api/sessions/start", {
       method: "POST",

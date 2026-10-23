@@ -21,7 +21,6 @@ for arg in "$@"; do
     --llm)   WANT_LLM=1 ;;
     --exec)  WANT_EXEC=1 ;;
     --full)  WANT_LLM=1; WANT_EXEC=1 ;;
-    --judge0) WANT_EXEC=1 ;;   # the name CLAUDE.md used, kept working
   esac
 done
 

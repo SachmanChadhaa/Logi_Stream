@@ -447,6 +447,24 @@ async fn observe(
     proxy(&state, reqwest::Method::POST, &url, Some(payload), &trace_id, Some(&user_id)).await
 }
 
+/// "Tutor me on this": the problem the observer read off the screen during the
+/// session for `problem_id` becomes a stored problem of its own. The browser
+/// names only its current problem; the screen text itself is taken from that
+/// session's memory on the server, never from the request.
+async fn problem_from_screen(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<StartBody>,
+) -> Response {
+    let trace_id = resolve_trace_id(&headers);
+    let user_id = resolve_user(&headers, &state);
+    let thread_id = derive_thread_id(&user_id, &body.problem_id);
+    info!(trace_id = %trace_id, thread_id = %thread_id, "problem from screen");
+    let url = format!("{}/problems/from-screen", state.orchestrator_url);
+    let payload = json!({ "thread_id": thread_id });
+    proxy(&state, reqwest::Method::POST, &url, Some(payload), &trace_id, Some(&user_id)).await
+}
+
 /// Is the local VLM reachable, and which model? Lets the UI say "observer
 /// unavailable" honestly before the student turns capture on.
 async fn observer_status(State(state): State<AppState>, headers: HeaderMap) -> Response {
@@ -640,6 +658,7 @@ async fn main() {
             post(observe).layer(DefaultBodyLimit::max(MAX_OBSERVE_BODY)),
         )
         .route("/api/problems", get(list_problems).post(create_problem))
+        .route("/api/problems/from-screen", post(problem_from_screen))
         .route("/api/problems/{problem_id}", get(get_problem))
         .route("/api/sessions/start", post(start_session))
         .route("/api/sessions/event", post(session_event))

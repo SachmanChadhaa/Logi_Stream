@@ -97,6 +97,9 @@ CTX = {"id": "custom-x", "title": "Echo", "description": "Print the input.", "ru
        "examples": [], "language": "python"}
 
 
+SNAPSHOTS: list = []
+
+
 @pytest.fixture
 def g(monkeypatch):
     from app import domain_client, llm
@@ -112,6 +115,9 @@ def g(monkeypatch):
                            "stderr": 'File "s/solution.py", line 1\nNameError: name \'oops\' is not defined'
                            if bad else ""}]}
     monkeypatch.setattr(domain_client, "execute", fake_execute)
+    SNAPSHOTS.clear()
+    monkeypatch.setattr(domain_client, "add_snapshot",
+                        lambda pid, uid, code, lang, **k: SNAPSHOTS.append((pid, code, lang)) or True)
 
     def no_llm(**k):
         raise RuntimeError("LLM down")
@@ -378,3 +384,88 @@ def test_gpu_garbage_is_named_not_parsed():
     for junk in ("", "@@@@@@@@@@@@"):
         with pytest.raises(observer.ObserverUnavailable, match="GPU fault"):
             observer.parse_reply(junk)
+
+
+# ------------------------------------------------------------ in-depth storage, no loops
+
+def _observe_code(g, thread, code, problem=None):
+    g.invoke(Command(resume={"type": "observe", "text": "x", "observation": {
+        "text": "x", "tags": {}, "code_revision": 0, "problem": problem,
+        "code": {"text": code, "language": "C"} if code else None}}), _cfg(thread))
+
+
+def test_each_new_version_of_screen_code_is_snapshotted_once(g):
+    g.invoke(initial_state("custom-x", "u", "t11", kind="custom"), _cfg("t11"))
+    _observe_code(g, "t11", "int a;")
+    _observe_code(g, "t11", "int a;")                       # same code: no new row
+    _observe_code(g, "t11", "int a; int b;")
+    assert [c for _, c, _ in SNAPSHOTS] == ["int a;", "int a; int b;"]
+    _observe_code(g, "t11", "int other;", problem={"title": "Another one", "statement": ""})
+    assert len(SNAPSHOTS) == 2, "code for a DIFFERENT problem on screen is not this problem's history"
+
+
+def test_asking_again_about_unchanged_code_escalates(g):
+    g.invoke(initial_state("custom-x", "u", "t12", kind="custom"), _cfg("t12"))
+    _observe_code(g, "t12", "int max = a[0];")
+    for _ in range(3):
+        g.invoke(Command(resume={"type": "chat", "text": "is it correct?"}), _cfg("t12"))
+    assert g.get_state(_cfg("t12")).values["temporal"]["review"]["asks"] == 3
+    _observe_code(g, "t12", "int max = a[0]; return max;")
+    g.invoke(Command(resume={"type": "chat", "text": "and now?"}), _cfg("t12"))
+    assert g.get_state(_cfg("t12")).values["temporal"]["review"]["asks"] == 1, "new code, fresh start"
+
+
+def test_prompt_lists_what_was_already_said_and_the_analysis():
+    from app.prompts.custom_tutor import build_custom_tutor_user
+    user = build_custom_tutor_user(
+        title="t", statement="s", constraints="", examples=[], language="python", bucket="NOT_RUN",
+        results_summary="", student_code="", diagnosis=None, history_summary="", hint_level=2,
+        recent_messages=[{"role": "tutor", "kind": "hint", "text": "Look at line 3."},
+                         {"role": "student", "kind": "chat", "text": "suggest test inputs"}],
+        insights={"time_complexity": "O(n)", "test_inputs": [{"input": "[5]", "expected_output": "5",
+                                                              "why": "smallest size"}]})
+    assert "YOU ALREADY SAID" in user and "- Look at line 3." in user
+    assert "time_complexity: O(n)" in user and "suggested test: [5] -> 5 (smallest size)" in user
+
+
+def test_screen_problem_falls_back_to_raw_text_when_the_llm_fails(monkeypatch):
+    from app import llm, screen_problems
+    def boom(**k):
+        raise RuntimeError("down")
+    monkeypatch.setattr(llm, "complete_json", boom)
+    a, by = screen_problems.analyse({"title": "Largest", "statement": "Given arr[]..."}, None)
+    assert by == "none" and a.statement == "Given arr[]..." and a.examples == []
+    body = screen_problems.create_body({"title": "Largest"}, {"text": "int f();", "language": "C"}, a, by)
+    assert body["source"] == "screen" and body["insights"]["screen_language"] == "C"
+    assert body["insights"]["analysed_by"] == "none"
+
+
+def test_screen_problem_is_reused_by_title(monkeypatch):
+    from app import domain_client, screen_problems
+    monkeypatch.setattr(domain_client, "list_problems", lambda *a, **k: [
+        {"id": "custom-1", "title": "Largest in Array", "kind": "custom"}])
+    monkeypatch.setattr(domain_client, "create_problem", lambda *a, **k: pytest.fail("must not create"))
+    out = screen_problems.open_or_create("u", {"title": "largest-in-array"}, None)
+    assert out == {"id": "custom-1", "reused": True}
+
+
+def test_repeats_catches_the_paraphrase_seen_in_the_e2e_run():
+    from app.nodes.code_tutor import repeats
+    a = ("Hypothesis: Your code appears to correctly find the largest element in an array by initializing "
+         "`max` with the first element and then iterating through the rest of the array to update `max` if "
+         "a larger element is found.\n\nWhat do you expect the function to return for the input `[1, 8, 7, 56, 90]`?")
+    b = ("Hypothesis: Your code correctly finds the largest element in an array by initializing `max` with the "
+         "first element and updating it during iteration.\n\nWhat do you expect the function to return for the "
+         "input `[1, 8, 7, 56, 90]`?")
+    assert repeats(b, a) and "same question" in repeats(b, a)
+    assert repeats("Try n = 1: what is arr[0] then?", a) is None
+
+
+def test_analysis_accepts_list_shaped_fields():
+    from app.screen_problems import Analysis
+    a = Analysis.model_validate({"constraints": ["1 <= n <= 10^6", "0 <= arr[i]"],
+                                 "examples": [{"input": "arr = [1, 2]", "output": 2}],
+                                 "test_inputs": [{"input": [5, 5], "expected_output": 5, "why": "all equal"}]})
+    assert a.constraints == "1 <= n <= 10^6\n0 <= arr[i]"
+    assert a.examples[0].output == "2"
+    assert a.test_inputs[0].input == "[5, 5]" and a.test_inputs[0].expected_output == "5"

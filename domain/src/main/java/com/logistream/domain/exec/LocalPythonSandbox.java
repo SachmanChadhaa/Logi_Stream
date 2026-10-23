@@ -14,7 +14,6 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -42,7 +41,6 @@ import org.springframework.stereotype.Component;
  * That is a deliberate, documented limitation of the MVP, not an oversight.
  */
 @Component
-@ConditionalOnProperty(name = "logistream.executor.mode", havingValue = "LOCAL", matchIfMissing = true)
 public class LocalPythonSandbox implements Sandbox {
 
     private static final Logger log = LoggerFactory.getLogger(LocalPythonSandbox.class);

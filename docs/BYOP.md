@@ -184,6 +184,28 @@ the vision model out (the two do not fit in VRAM together). Timeouts: LLM
 | Two Sum regression `demo/rehearse.sh` | GREEN, 5 beats, 78 s |
 | `gateway/verify.sh` | 20 passed, 0 failed |
 
+## 8b. Screen problems stored in depth; no repeat loops (2026-10-24)
+
+* `POST /api/problems/from-screen {problem_id}` -> orchestrator `/problems/from-screen`:
+  the problem the observer read during that session (taken from the session's
+  memory, never from the request) is analysed by the local LLM
+  (`app/screen_problems.py`) and stored with `source='screen'` and an `insights`
+  JSON: function signature, expected time/space complexity, output format,
+  screen language, 4-6 suggested test inputs with reasons, `analysed_by`.
+  Examples and constraints go to their existing columns. Same title -> reused.
+  LLM failure -> raw statement stored, `analysed_by: "none"`.
+* `app.solve_snapshots`: every distinct version of the student's on-screen code
+  for that problem (`POST /internal/problems/{id}/snapshots`, deduplicated by
+  sha256). `GET /api/problems/{id}` returns `snapshot_count`.
+* Loops: a fresh frame before every question while sharing; `temporal.review`
+  counts questions about unchanged code and raises the hint level (max 3); the
+  prompt lists the last two replies as "already said"; `verify_code` rejects a
+  word-for-word repeat and downgrades `Verified:` when nothing has run.
+* Vision: a separate copy-only transcription pass (line-numbered) keeps typos
+  and duplicated lines; frames at 1600 px; `OLLAMA_VLM_NUM_GPU=0` = CPU fallback.
+* Judge0 removed: the `judge0` Java package, `judge0/HOSTED.md`,
+  `scripts/judge0_smoke.sh`, `EXECUTOR_MODE` and `JUDGE0_*` settings.
+
 ## 9. Not verified / known limitations
 
 * **Document PiP in real Chrome is not verified.** The Claude browser pane

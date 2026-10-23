@@ -18,7 +18,7 @@ import com.logistream.domain.model.Models.TestInput;
 class CustomProblemValidatorTest {
 
     private static CreateProblemRequest req(String statement, String language, List<TestInput> tests) {
-        return new CreateProblemRequest(null, statement, null, null, null, language, tests);
+        return new CreateProblemRequest(null, statement, null, null, null, language, tests, null, null, null);
     }
 
     @Test
@@ -68,7 +68,7 @@ class CustomProblemValidatorTest {
         List<ExampleInput> ex = Collections.nCopies(CustomProblemValidator.MAX_EXAMPLES + 1,
                 new ExampleInput("1", "1", ""));
         assertEquals("examples", CustomProblemValidator.validate(
-                new CreateProblemRequest(null, "p", null, ex, null, null, null)).field());
+                new CreateProblemRequest(null, "p", null, ex, null, null, null, null, null, null)).field());
     }
 
     @Test
@@ -77,8 +77,20 @@ class CustomProblemValidatorTest {
         assertEquals("Count vowels",
                 CustomProblemValidator.titleFor(req("## Count vowels\nGiven a string...", null, null)));
         assertEquals("Mine", CustomProblemValidator.titleFor(
-                new CreateProblemRequest("  Mine ", "s", null, null, null, null, null)));
+                new CreateProblemRequest("  Mine ", "s", null, null, null, null, null, null, null, null)));
         String longLine = "a".repeat(100);
         assertEquals(60, CustomProblemValidator.titleFor(req(longLine, null, null)).length());
+    }
+
+    @Test
+    void screenSourceAndInsightsAreValidated() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper m = new com.fasterxml.jackson.databind.ObjectMapper();
+        assertNull(CustomProblemValidator.validate(new CreateProblemRequest(
+                "Largest", "s", null, null, null, "python", null, "screen", "geeksforgeeks.org",
+                m.readTree("{\"time_complexity\":\"O(n)\"}"))));
+        assertEquals("source", CustomProblemValidator.validate(new CreateProblemRequest(
+                null, "s", null, null, null, "python", null, "email", null, null)).field());
+        assertEquals("insights", CustomProblemValidator.validate(new CreateProblemRequest(
+                null, "s", null, null, null, "python", null, "screen", null, m.readTree("[1]"))).field());
     }
 }

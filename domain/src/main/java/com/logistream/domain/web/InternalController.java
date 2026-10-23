@@ -20,6 +20,7 @@ import com.logistream.domain.model.Models.ExecuteRequest;
 import com.logistream.domain.model.Models.ProblemContext;
 import com.logistream.domain.model.Models.ProblemRow;
 import com.logistream.domain.model.Models.ProblemView;
+import com.logistream.domain.model.Models.SnapshotRequest;
 import com.logistream.domain.repo.ProblemRepository;
 
 /**
@@ -55,7 +56,7 @@ public class InternalController {
                 .<ResponseEntity<?>>map(p -> ResponseEntity.ok(new ProblemContext(
                         p.id(), p.title(), p.description(), p.rubric(),
                         p.rubricVersion(), p.starterCode(), p.kind(), p.constraintsText(),
-                        p.examples(), p.language())))
+                        p.examples(), p.language(), p.source(), p.insights())))
                 .orElseGet(() -> unknown(id));
     }
 
@@ -96,18 +97,46 @@ public class InternalController {
         }
 
         String id = repo.insertCustom(userId, req, CustomProblemValidator.titleFor(req));
-        log.info("created custom problem id={} owner={} tests={} statement_chars={}",
-                id, userId, req.tests() == null ? 0 : req.tests().size(), req.statement().length());
+        log.info("created custom problem id={} owner={} source={} tests={} statement_chars={}",
+                id, userId, req.source() == null ? "form" : req.source(),
+                req.tests() == null ? 0 : req.tests().size(), req.statement().length());
 
         ProblemRow p = repo.findProblem(id).orElseThrow();
         return ResponseEntity.status(201).body(viewOf(p, repo));
+    }
+
+    /**
+     * The on-screen agent saw the owner's code for this problem (written outside
+     * this app). Stored once per distinct version: the solving history.
+     */
+    @PostMapping("/problems/{id}/snapshots")
+    public ResponseEntity<?> snapshot(@PathVariable String id, @RequestBody(required = false) SnapshotRequest req,
+                                      @RequestHeader(value = USER_HEADER, required = false) String userId) {
+        if (userId == null || userId.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", USER_HEADER + " is required"));
+        }
+        if (req == null || req.code() == null || req.code().isBlank()) {
+            return ResponseEntity.status(422).body(Map.of("error", "code is required", "field", "code"));
+        }
+        if (req.code().length() > CustomProblemValidator.MAX_SNAPSHOT_CODE) {
+            return ResponseEntity.status(422).body(Map.of("error", "code is too long", "field", "code"));
+        }
+        ProblemRow p = visible(id, userId, true).orElse(null);
+        if (p == null || !p.isCustom()) {
+            return unknown(id);
+        }
+        String language = req.language() == null ? "" : req.language().strip();
+        boolean stored = repo.addSnapshot(id, userId, language.length() > 20 ? language.substring(0, 20) : language,
+                req.code());
+        return ResponseEntity.ok(Map.of("stored", stored, "count", repo.countSnapshots(id)));
     }
 
     /** Field by field, so the rubric and hidden tests can never ride along. */
     static ProblemView viewOf(ProblemRow p, ProblemRepository repo) {
         return new ProblemView(p.id(), p.title(), p.description(), p.examples(),
                 p.starterCode(), p.language(), p.kind(), p.constraintsText(),
-                repo.countTests(p.id()));
+                repo.countTests(p.id()), p.source(), p.sourceSite(), p.insights(),
+                repo.countSnapshots(p.id()));
     }
 
     private Optional<ProblemRow> visible(String id, String userId, boolean enforceOwner) {

@@ -151,6 +151,7 @@ export interface TemporalView {
   screen_problem?: ScreenProblem | null;
   /** code the observer copied off the screen (written outside this app); never run */
   screen_code?: { text: string; language: string; ts: string } | null;
+  review?: { asks: number };
 }
 
 /** Text the local vision model read from the student's screen. Untrusted data. */
@@ -184,6 +185,24 @@ export interface Problem {
   kind?: ProblemKind;
   constraints?: string;
   test_count?: number;
+  /** "form" (typed in), "screen" (read off the screen by the agent), "curated" */
+  source?: string;
+  source_site?: string;
+  insights?: ProblemInsights;
+  /** versions of the student's on-screen code stored while solving */
+  snapshot_count?: number;
+}
+
+/** In-depth analysis of a problem read off the screen. Advisory: model-made. */
+export interface ProblemInsights {
+  function_signature?: string;
+  time_complexity?: string;
+  space_complexity?: string;
+  output_format?: string;
+  screen_language?: string;
+  test_inputs?: { input: string; expected_output?: string; why?: string }[];
+  analysed_by?: string;
+  advisory?: string;
 }
 
 export interface ProblemSummary {

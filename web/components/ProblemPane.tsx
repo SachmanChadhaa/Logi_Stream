@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BookOpen, CircleCheck, FileText, Loader2 } from "lucide-react";
+import { BookOpen, CircleCheck, FileText, FlaskConical, Gauge, History, Loader2, ScanEye, Sigma } from "lucide-react";
 
 import type { Problem, SessionView } from "@/lib/types";
 
@@ -72,6 +72,59 @@ function renderMarkdown(md: string) {
   });
 }
 
+/** The stored in-depth analysis of a problem read off the screen. */
+function Insights({ problem }: { problem: Problem }) {
+  const ins = problem.insights ?? {};
+  const facts = [
+    ["Function", ins.function_signature, Sigma],
+    ["Time", ins.time_complexity, Gauge],
+    ["Space", ins.space_complexity, Gauge],
+    ["Output", ins.output_format, FileText],
+  ] as const;
+  const shown = facts.filter(([, v]) => v);
+  const tests = ins.test_inputs ?? [];
+  if (!shown.length && !tests.length && !problem.snapshot_count) return null;
+  return (
+    <>
+      <h2 className={SECTION}>Analysis</h2>
+      <div className="overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
+        {shown.map(([label, value, Icon]) => (
+          <div key={label} className="flex gap-3 border-b border-[var(--border)] px-3 py-2 text-[12.5px] last:border-b-0">
+            <span className="flex w-20 shrink-0 items-center gap-1.5 text-[var(--faint)]">
+              <Icon size={12} aria-hidden /> {label}
+            </span>
+            <span className={label === "Function" ? "font-mono text-[12px] text-[var(--cyan)]" : ""}>{value}</span>
+          </div>
+        ))}
+        {!!problem.snapshot_count && (
+          <div className="flex items-center gap-1.5 px-3 py-2 text-[11.5px] text-[var(--muted)]">
+            <History size={12} aria-hidden />
+            {problem.snapshot_count} version{problem.snapshot_count === 1 ? "" : "s"} of your code saved while solving
+          </div>
+        )}
+      </div>
+      {tests.length > 0 && (
+        <>
+          <h2 className={SECTION}>Inputs worth trying</h2>
+          <div className="space-y-1.5">
+            {tests.map((t, i) => (
+              <div key={i} className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                <div className="flex items-start gap-2 font-mono text-[12px]">
+                  <FlaskConical size={12} className="mt-0.5 shrink-0 text-[var(--purple)]" aria-hidden />
+                  <span className="min-w-0 flex-1 break-words">{t.input}</span>
+                  {t.expected_output && <span className="text-[var(--pass)]">→ {t.expected_output}</span>}
+                </div>
+                {t.why && <p className="mt-0.5 pl-5 text-[11.5px] text-[var(--muted)]">{t.why}</p>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {ins.advisory && <p className="mt-2 text-[10.5px] leading-snug text-[var(--faint)]">{ins.advisory}.</p>}
+    </>
+  );
+}
+
 export function ProblemPane({
   problem,
   view,
@@ -131,8 +184,12 @@ export function ProblemPane({
         ) : (
           <div>
             <div className="mb-1 flex items-center gap-2 text-[11px] text-[var(--faint)]">
-              <FileText size={12} aria-hidden />
-              {problem.kind === "custom" ? "your problem" : "sample problem"} · {problem.language}
+              {problem.source === "screen" ? <ScanEye size={12} aria-hidden /> : <FileText size={12} aria-hidden />}
+              {problem.source === "screen"
+                ? `read off your screen${problem.source_site ? ` · ${problem.source_site}` : ""}`
+                : problem.kind === "custom" ? "your problem" : "sample problem"}
+              {" · "}
+              {problem.insights?.screen_language ? `you write ${problem.insights.screen_language}` : problem.language}
             </div>
             <h1 className="mb-4 text-[22px] font-semibold">{problem.title}</h1>
             {problem.kind === "custom" ? (
@@ -152,6 +209,8 @@ export function ProblemPane({
                 </p>
               </>
             )}
+
+            {problem.insights && <Insights problem={problem} />}
 
             {problem.examples.length > 0 && (
               <h2 className={SECTION}>Examples</h2>

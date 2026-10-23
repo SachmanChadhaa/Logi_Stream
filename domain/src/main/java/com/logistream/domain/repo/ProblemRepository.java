@@ -49,7 +49,10 @@ public class ProblemRepository {
                         rs.getString("kind"),
                         rs.getString("owner_id"),
                         rs.getString("language"),
-                        rs.getString("constraints_text"));
+                        rs.getString("constraints_text"),
+                        rs.getString("source"),
+                        rs.getString("source_site"),
+                        mapper.readTree(rs.getString("insights")));
             } catch (Exception e) {
                 throw new IllegalStateException(
                         "problem " + rs.getString("id") + " has unparseable jsonb", e);
@@ -68,7 +71,7 @@ public class ProblemRepository {
         List<ProblemRow> rows = jdbc.query("""
                 SELECT id, title, description, examples, starter_code, harness_python,
                        rubric, rubric_version, cpu_time_limit, wall_time_limit, memory_limit_kb,
-                       kind, owner_id, language, constraints_text
+                       kind, owner_id, language, constraints_text, source, source_site, insights
                   FROM app.problems
                  WHERE id = ?
                 """, problemMapper, id);
@@ -140,15 +143,26 @@ public class ProblemRepository {
             throw new IllegalStateException("cannot serialise examples", e);
         }
 
+        String insights;
+        try {
+            insights = req.insights() == null || req.insights().isNull()
+                    ? "{}" : mapper.writeValueAsString(req.insights());
+        } catch (Exception e) {
+            throw new IllegalStateException("cannot serialise insights", e);
+        }
+
         jdbc.update("""
                 INSERT INTO app.problems
                   (id, title, description, examples, starter_code, harness_python,
-                   rubric, rubric_version, kind, owner_id, language, constraints_text)
-                VALUES (?, ?, ?, ?::jsonb, ?, '', '{}'::jsonb, 1, ?, ?, ?, ?)
+                   rubric, rubric_version, kind, owner_id, language, constraints_text,
+                   source, source_site, insights)
+                VALUES (?, ?, ?, ?::jsonb, ?, '', '{}'::jsonb, 1, ?, ?, ?, ?, ?, ?, ?::jsonb)
                 """,
                 id, title, req.statement().strip(), examples, nz(req.starter_code()),
                 Models.KIND_CUSTOM, ownerId, req.language() == null ? "python" : req.language(),
-                nz(req.constraints()).strip());
+                nz(req.constraints()).strip(),
+                req.source() == null || req.source().isBlank() ? "form" : req.source(),
+                nz(req.source_site()).strip(), insights);
 
         List<TestInput> tests = req.tests() == null ? List.of() : req.tests();
         for (int i = 0; i < tests.size(); i++) {
@@ -160,6 +174,36 @@ public class ProblemRepository {
                     """, id, i + 1, label, nz(t.input()), nz(t.expected_output()));
         }
         return id;
+    }
+
+    /**
+     * Records one version of the student's on-screen code. The same code seen
+     * again is not stored twice. Returns true if it was new.
+     */
+    public boolean addSnapshot(String problemId, String ownerId, String language, String code) {
+        String sha = sha256(code);
+        int n = jdbc.update("""
+                INSERT INTO app.solve_snapshots (problem_id, owner_id, language, code, code_sha)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (problem_id, owner_id, code_sha) DO NOTHING
+                """, problemId, ownerId, nz(language), code, sha);
+        return n > 0;
+    }
+
+    public int countSnapshots(String problemId) {
+        Integer n = jdbc.queryForObject(
+                "SELECT count(*) FROM app.solve_snapshots WHERE problem_id = ?", Integer.class, problemId);
+        return n == null ? 0 : n;
+    }
+
+    private static String sha256(String s) {
+        try {
+            byte[] d = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(d);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private static String nz(String s) {

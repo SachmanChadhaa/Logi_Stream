@@ -60,7 +60,15 @@ EVIDENCE BEFORE OPINION
   It may be in a different language from LANGUAGE (which is only what this app \
   can run): that is fine and expected - review it in ITS language, and never \
   tell the student to switch languages.
-- Answer THE STUDENT'S LATEST MESSAGE directly. Never repeat an earlier reply.
+- Answer THE STUDENT'S LATEST MESSAGE directly. YOU ALREADY SAID lists your last \
+  replies: never say the same thing again in other words. If they ask again about \
+  unchanged code, the HINT LEVEL has gone up - be one step more specific.
+- If they ask for test inputs (or what to try), give 3 to 5 concrete inputs in the \
+  problem's own format, each with one line on why it matters (smallest size, all \
+  equal, extremes, duplicates, negatives - whatever applies). Give an expected \
+  output only when it follows with certainty from the statement. No code.
+- PROBLEM ANALYSIS (if present) was produced by a language model from the screen \
+  text: use it for orientation, never quote its complexities as facts.
 - The code changes between turns. Your EARLIER REPLIES may describe an older \
   version: judge only the code as it is now (CODE ON THE STUDENT'S SCREEN, or \
   THE STUDENT'S CURRENT CODE). If a problem you pointed out earlier is gone, \
@@ -94,6 +102,7 @@ def build_custom_tutor_user(
     session_memory: str = "",
     strategy: str = "point-to-evidence",
     screen_code: dict[str, Any] | None = None,
+    insights: dict[str, Any] | None = None,
 ) -> str:
     ex_lines = []
     for i, ex in enumerate(examples or [], start=1):
@@ -113,6 +122,17 @@ def build_custom_tutor_user(
     ) or "(no conversation yet)"
     latest = next((m.get("text", "") for m in reversed(recent_messages)
                    if m.get("role") == "student" and m.get("kind") == "chat"), "")
+    said = [m.get("text", "") for m in recent_messages if m.get("role") == "tutor"][-2:]
+    already = "\n".join(f"- {s}" for s in said) or "(nothing yet)"
+
+    ins = insights or {}
+    analysis_lines = [f"{k}: {ins[k]}" for k in
+                      ("function_signature", "time_complexity", "space_complexity", "output_format")
+                      if ins.get(k)]
+    for ti in (ins.get("test_inputs") or [])[:6]:
+        analysis_lines.append(f"suggested test: {ti.get('input')} -> "
+                              f"{ti.get('expected_output') or '(expected output not certain)'} ({ti.get('why')})")
+    analysis = "\n".join(analysis_lines) or "(none)"
 
     # writing on another site in another language: say so where the model looks,
     # or it argues about the language instead of reading the code
@@ -164,8 +184,14 @@ HINT LEVEL: {hint_level}
 CODE ON THE STUDENT'S SCREEN (outside this app, read by a vision model, NEVER run)
 {screen}
 
+PROBLEM ANALYSIS (language-model analysis of the screen text, advisory)
+{analysis}
+
 RECENT CONVERSATION
 {transcript}
+
+YOU ALREADY SAID (do not repeat these)
+{already}
 
 THE STUDENT'S LATEST MESSAGE
 {latest or "(no message: respond to the latest run)"}
