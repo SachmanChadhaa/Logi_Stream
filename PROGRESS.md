@@ -253,15 +253,31 @@ often enough to be worth pointing at on stage.
 | 7 | §6.4 code-line rules tightened with two extra patterns | Human-approved 2026-09-21 | Closes the colonless `return [` / `import x` gap; guarded against prose false positives. |
 | 8 | **Bring-your-own-problem** (`feature/bring-your-own-problem`, 2026-10-23) | Human brief `CLAUDE_IMPLEMENTATION_PLAN.md` | Additive contract changes to §5.1/5.2/5.4 (new problem routes, `problem_kind`, `diagnosis`, `run_history`, `NO_TESTS` bucket). Custom problems skip the logic gate (no rubric). Full write-up: `docs/BYOP.md`. |
 
-## BYOP (2026-10-23) — status
+## BYOP (2026-10-23) — status (v2 brief `CLAUDE_CODE_BRIEF (1).md`)
+
+Full handoff: `docs/BYOP.md`. Branch `feature/bring-your-own-problem`, **local commits only** (never pushed, merged or deployed).
 
 | Item | Status |
 |---|---|
-| Audit, branch, baseline (85 / 13 / 6 / tsc clean) | ✅ |
-| Custom-problem contract (Java validate/store, gateway routes, ownership) | ✅ |
-| Generalized tutor (custom prompt, ownership at start, diagnosis + run history) | ✅ |
-| Frontend landing form + `?problem=` sessions, sample kept | ✅ |
-| Tests: pytest 103, mvn 22, cargo 7, tsc clean, `demo/verify_byop.py --no-llm` **37/37**, browser run | ✅ |
-| **LLM outage**: primary free model withdrawn, backup 404 — all LLM turns fail (curated too) | 🔴 needs the human: new model choice |
-| Screen observer, Ollama VLM, XGBoost training | ⏳ not started (plan Level 2/3; see `docs/BYOP.md` §8) |
-| Committed | ❌ not committed — the brief requires explicit authorization |
+| Step 2 — custom problems, stdin/stdout runs, `NO_TESTS` = "ran, not verified", custom tutor (single free-form phase) | ✅ `d0030b9` |
+| Step 3 — demo passcode on every `/api`, CORS allow-list, run/observe rate limits | ✅ `d1a7cfc`, verified live on a second gateway |
+| Step 4 — temporal memory in the checkpoint, feature schema v1, deterministic `diagnose` node (≤ 2 passes) | ✅ `d1a7cfc` |
+| Step 5 — on-screen assistant (Document PiP + in-page fallback), opt-in screen capture → local Qwen2.5-VL 3B | ✅ `0f4ba59`; PiP / getDisplayMedia / voice **not verified in real Chrome** |
+| LLM outage → **local Ollama** `logistream-qwen3` (owner decision), `think: false`, 8k context | ✅ `2d0b85e` |
+| Steps 6–7 — Rust `intel/` sidecar: burn GRU + XGBoost-style booster, synthetic v0, xgboost cross-check | ✅ `274fd82`; booster in **shadow mode** (loses to rules on held-out data) |
+| Vercel deploy + Cloudflare tunnel | ⏳ runbook only (`demo/DEPLOY_VERCEL.md`); the owner runs it |
+
+### Final checks (2026-10-23)
+
+| Check | Result |
+|---|---|
+| `orchestrator: uv run pytest` | 120 passed |
+| `intel: cargo test --release` | 14 passed |
+| `gateway: cargo test` | 11 passed |
+| `domain: mvn test` | 22 passed |
+| `web: tsc --noEmit`, `next build` | clean |
+| `demo/verify_byop.py` (real local LLM) | 41/41 |
+| `demo/rehearse.sh` (Two Sum regression) | GREEN, 5 beats, 78 s (F1 10 s · F2 8 s · F3 0 s · F4 51 s · F5 3 s) |
+| `gateway/verify.sh` | 20 passed, 0 failed |
+
+Measured: VLM 3.1–3.2 s/frame (2.9 GB, 100% GPU); text model 10 GB (42% CPU), tutor turn 12–28 s warm, ~66–85 s after a VLM swap.

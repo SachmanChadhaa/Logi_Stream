@@ -1,191 +1,203 @@
-# Bring-your-own-problem (BYOP) — design, contract and status
+# Bring-your-own-problem + screen-aware Socratic tutor — handoff
 
-Branch: `feature/bring-your-own-problem`. Implements the demo-critical half of
-`CLAUDE_IMPLEMENTATION_PLAN.md` (steps 1–6, 10–12) plus the rules baseline of the
-diagnostic ranker (step 8) and run-level temporal memory (part of step 7). The
-screen observer and local VLM are **not built yet** — see *Not done* below.
+Branch `feature/bring-your-own-problem` (local only; nothing pushed, merged or
+deployed). Built to `CLAUDE_CODE_BRIEF (1).md` (v2) on top of
+`CLAUDE_IMPLEMENTATION_PLAN.md`. All seven steps of the brief's build order
+were done; nothing was cut. What is *not* verified is listed in §9.
 
-The Level 2 / Level 3 direction is unchanged: local VLM via Ollama, temporal
-state, an XGBoost ranker that complements (never replaces) the model, and the
-existing LangGraph tutor as the only tutor.
+| Commit | Content |
+|---|---|
+| `d0030b9` | Step 2: custom problems, stdin/stdout execution, custom tutor, rules ranker |
+| `d1a7cfc` | Steps 3–4 backend: passcode/CORS/rate limit, temporal memory, feature schema v1, diagnose node, observer endpoints |
+| `0f4ba59` | Steps 4–5 UI: on-screen assistant (PiP), screen observer capture |
+| `2d0b85e` | Local LLM via Ollama (owner decision), think off, timeouts |
+| `274fd82` | Steps 6–7: Rust `intel/` sidecar, GRU + booster, training, eval, xgboost cross-check |
+
+Rollback: `git switch main` (the branch is local only). The schema change is
+additive, so no database rollback is needed.
 
 ---
 
-## 1. Audit findings (step 1)
+## 1. What a student can do now
 
-| Area | Finding before this change |
-|---|---|
-| Frontend | `web/app/page.tsx` hard-coded `PROBLEM_ID = "two-sum"`; the only entry path. |
-| Gateway | Problem id is free-form in every body; `thread_id = sha256(user:problem)` — already problem-agnostic. `GET /api/problems/{id}` called Java's **public** route with no user. Bound `0.0.0.0`. |
-| Orchestrator | Every session started in `LOGIC`; the only way to the editor was passing the rubric-driven `evaluate_logic`. Nodes read `ctx["rubric"]` unconditionally. |
-| Java | `app.problems` had no owner or kind. `ExecutionService` threw if a problem had no tests. The harness was two-sum specific (function call), but stored per problem. Bound to all interfaces while running arbitrary code via `LocalPythonSandbox` (not a security sandbox). |
-| DB | Init scripts run only on an empty volume; the demo volume must never be wiped (CLAUDE.md D3-T4), so a migration cannot live in `db/init/`. |
-| Ollama / GPU | Ollama 0.32.7 installed, one text model (`qwen3-14b-64k`), no VLM pulled. RTX 5050 Laptop, 8 GB VRAM. |
+1. Open the UI → passcode screen when `DEMO_PASSCODE` is set → **Bring your own
+   problem** form (statement, constraints, examples, Python, current attempt,
+   optional stdin → expected-stdout tests). **Try a sample problem → Two Sum**
+   stays as the reliable fallback, with its logic gate unchanged.
+2. A custom session starts in one free-form phase: chat and code at any time,
+   no rubric, no logic gate.
+3. Runs go through the existing Java sandbox. Buckets: `ACCEPTED`,
+   `WRONG_ANSWER`, `TLE`, `COMPILE_ERROR`, `RUNTIME_ERROR`, `INFRA_ERROR`, and
+   **`NO_TESTS`** ("ran, not verified") when the problem has no tests;
+   unsupported languages are rejected with 422.
+4. Every run is diagnosed (rules ranker with quoted evidence; Rust GRU +
+   booster alongside), recorded in temporal memory, and answered by the same
+   Socratic tutor, which must label **Verified:** vs **Hypothesis:**.
+5. **Assistant** opens an always-on-top Chrome Document Picture-in-Picture
+   panel (in-page panel elsewhere): orb, "Try saying…" chips, latest reply,
+   `+` attach, typed input, opt-in voice, capture status. Same conversation.
+6. **Share screen** (opt-in, browser picker) samples the student's own IDE
+   about every 15 s and on run/error; frames go to the laptop's **local**
+   Ollama vision model and only a short text observation is kept.
 
-Baseline before any edit: `pytest` 85/85, `mvn test` 13/13, `cargo test` 6/6, `tsc --noEmit` clean.
+## 2. Architecture (no new services except `intel/`)
 
-## 2. Product flow
+```
+web (Next.js, Vercel or :3000) ──► gateway (Rust :8000)  passcode · CORS list · rate limits
+                                       ├─► orchestrator (FastAPI + LangGraph :8001)
+                                       │     ├─ diagnose node ──► intel (Rust :8003, optional, 2 s timeout)
+                                       │     ├─ tutor nodes ──► LiteLLM :4000 ──► Ollama logistream-qwen3 (local)
+                                       │     └─ observe ──► Ollama qwen2.5vl:3b (local only)
+                                       └─► domain (Java :8080) ──► local Python subprocess
+```
 
-* `/` — landing page. **Bring your own problem** form (primary) + *Try a sample
-  problem* (Two Sum) + *Your problems*.
-* `/?problem=<id>` — a session. Refresh resumes it (checkpointing unchanged).
-* **Curated** problems (two-sum) keep the logic-first gate exactly as before.
-* **Custom** problems start in `CODE` with the student's attempt in the editor.
-  There is no rubric, so there is no logic gate; the tutor is available from the
-  first turn (chat) and after every run.
+Graph (custom and curated share it):
 
-## 3. Contract changes (all additive / backward compatible)
+```
+await_input ─(code)──► execute_code ─INFRA─► await_input
+                            └──► diagnose ─ACCEPTED─► finish
+                                     └──► code_tutor ⇄ verify_code ─► await_input
+await_input ─(chat, CODE)──► diagnose ─► code_tutor ⇄ verify_code ─► await_input
+await_input ─(observe)─────► diagnose ─────────────────────────────► await_input
+(Two Sum LOGIC path unchanged: evaluate_logic / logic_tutor / summarize_logic)
+```
 
-### Gateway (browser-facing)
+`diagnose` is deterministic and never calls the LLM: gather evidence →
+feature vector → GRU step → rank (rules; booster scores) → strategy → temporal
+update, with at most 2 passes per turn.
+
+## 3. API changes (all additive)
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/api/problems` | **new** → `{problems:[{id,title,kind,language,created_at}]}`: curated + the caller's own |
-| `POST` | `/api/problems` | **new** → 201 + problem view. Body below. Owner = resolved user (never the body) |
-| `GET` | `/api/problems/{id}` | now via Java `/internal/problems/{id}/view` with `X-User-Id`; 404 for someone else's problem |
+| GET | `/api/auth/check` | 200 when the passcode is right (or not required), 401 `passcode_required` |
+| GET | `/api/problems` | curated + the caller's own |
+| POST | `/api/problems` | create; Java validates (422 `{error, field}`), owner = resolved user |
+| GET | `/api/problems/{id}` | owner-checked view (404 for someone else's) |
+| POST | `/api/sessions/observe` | `{problem_id, image_b64, trigger, code_revision}` → SessionView; 503 "observer unavailable: …"; 3 MB cap; rate-limited |
+| GET | `/api/observer/status` | `{available, model, model_present, ollama_version, detail}` |
 
-All session endpoints are unchanged. `thread_id` derivation is unchanged and
-still never accepted from the client.
+Every `/api` route requires `X-Demo-Passcode` when `DEMO_PASSCODE` is set.
+`CORS_ORIGIN` is a comma-separated allow-list (localhost:3000 always added).
+Code runs and observations: `RUN_RATE_LIMIT_PER_MIN`,
+`OBSERVE_RATE_LIMIT_PER_MIN` (default 12), keyed per passcode.
 
-```json
-POST /api/problems
-{
-  "title": "optional, ≤120",
-  "statement": "required, ≤20000",
-  "constraints": "optional, ≤4000",
-  "examples": [{"input": "...", "output": "...", "explanation": "optional"}],   // ≤10
-  "starter_code": "optional, ≤50000 — starter code or current attempt",
-  "language": "python",                                                        // only python today
-  "tests": [{"label": "optional", "input": "stdin", "expected_output": "stdout"}] // ≤20, each ≤20000
-}
-```
+SessionView gains `problem_kind`, `diagnosis` (ranker, candidates with
+evidence, rule score, booster `model_score`, iterations), `temporal` (summary,
+code revision, events with `stale`, hypotheses, next action, ranker, student
+state) and `debug.run_history`. The GRU hidden vector never leaves the server.
 
-Validation is in Java (`CustomProblemValidator`): 422 with `{error, field}`
-(the gateway copies `error` into `detail` for the UI). Cap: 100 problems/user.
+Orchestrator internal: `POST /sessions/{thread}/observe`, `GET /observer/status`.
+Intel internal: `GET /health`, `POST /v1/track`, `POST /v1/rank`.
 
-Problem view gains `kind` (`curated|custom`), `constraints`, `test_count`.
+## 4. Identity and isolation
 
-### Execution model for custom problems
+* The browser keeps a random `anon-<uuid>` in localStorage and sends it as
+  `X-Demo-User`; auth is still the MVP mock. The gateway derives the thread as
+  `sha256(user:problem)` and never accepts a client `thread_id`.
+* A custom problem id is an opaque, server-minted `custom-<uuid>`, bound to its
+  owner: the brief's default was a `sess_<uuid>` per custom problem. The
+  properties are the same (opaque, server-minted, user-bound, client cannot
+  pick the thread); minting it on the problem row let every existing session
+  route stay unchanged. Two Sum keeps its derived id.
+* One graph turn per thread at a time (per-thread lock); an observation that
+  arrives mid-turn is skipped with 409.
 
-The program reads **stdin** and prints its answer; each test is
-`(stdin, expected stdout)`, compared after `strip()` exactly like curated tests.
-Student-written tests are stored as public (nothing to hide). If there are **no
-tests**, Java runs the program once on empty input and returns bucket
-**`NO_TESTS`** with `passed/total = 0/0` — errors still map to
-`COMPILE_ERROR`/`RUNTIME_ERROR`/`TLE`, but a clean run is never `ACCEPTED` and the
-session never reaches `DONE` on it.
+## 5. Temporal memory and the observer
 
-### SessionView additions
+* `state["temporal"]` in the LangGraph checkpoint: rolling deterministic
+  summary, the last 20 events (`run` / `chat` / `observation`), code revision,
+  open hypotheses, next action, ranker, student state, GRU hidden state. Reset
+  clears it. No image is ever in state: Python calls Ollama *before* resuming
+  the graph and only the returned text enters it.
+* Staleness: an observation records the code revision the browser had when it
+  captured the frame. After a newer run it is shown as "seen earlier" and the
+  prompt says not to treat it as current. Verified live: three observations
+  turned stale the moment a run happened.
+* Local-only: `OLLAMA_URL` must be localhost/127.0.0.1/::1 or the orchestrator
+  refuses to start; there is no cloud vision path. Frames are validated
+  (JPEG/PNG, ≤ 2.5 MB) and one VLM call runs at a time.
 
-* `problem_kind`: `curated | custom`
-* `diagnosis`: `{ranker, score_kind, bucket, candidates:[{id, cause, next_action, score, evidence[]}]}` or null
-* `debug.run_history`: `[{ts, bucket, passed, total, code_sha, top_cause, verified}]`
+## 6. Rust `intel/` (synthetic-trained v0, advisory, unvalidated)
 
-### Schema
+* `features.rs` — schema v1 (`docs/feature_schema_v1.md`), shared with Python
+  through `intel/tests/golden_v1.json`, checked by both test suites.
+* `gru.rs` — burn 0.18 (NdArray CPU, autodiff; built fine on the GNU target).
+  30 → GRU(32) → student state (4) + cause group (6). Truncated BPTT, window 8.
+* `booster.rs` — XGBoost-style, pure Rust: g = p − y, h = p(1 − p),
+  w* = −G/(H + λ), gain with γ, shrinkage, depth, min child weight, row/column
+  subsampling, 32-bin histograms, one-vs-rest over 22 causes.
+* `synth.rs` — seeded scenarios (progressing, stuck, thrashing, idle,
+  recovering); split by scenario, every 5th scenario group held out.
+* `intel-train` → `intel/models/` (git-ignored; `start.sh` trains on first run,
+  ~90 s, deterministic). `intel-serve` is stateless.
 
-`domain/src/main/resources/schema-byop.sql`, applied by Spring at every startup
-(idempotent `ALTER … ADD COLUMN IF NOT EXISTS`): `kind`, `owner_id`, `language`,
-`constraints_text`, `created_at` on `app.problems`. Existing rows default to
-`curated`. **No volume wipe needed.**
+Held-out results (`intel/models/metrics-v0.json`, `xgb_crosscheck.json`):
 
-## 4. Orchestrator
+| Task | Rules baseline | Rust model | real XGBoost 3.4.1 |
+|---|---|---|---|
+| Student state, accuracy / macro-F1 | 0.637 / 0.648 | **GRU 0.921 / 0.922** | – |
+| Cause ranking, top-1 (2,096 cases) | **0.990** | booster 0.973 | 0.974 |
+| Cause ranking, real-choice top-1 (552) | **0.964** | booster 0.899 | 0.900 |
+| Cause ranking, macro-F1 | **0.994** | booster 0.895 | 0.895 |
+| Top-1 agreement Rust vs XGBoost | | 99.8% | |
 
-* `initial_state(..., kind, starter_code)`: custom → `phase=CODE`, `user_code=starter`.
-* `start` checks ownership once (Java 404 → 404) before creating the thread.
-* `execute_code` → `diagnostics.rank()` (rules baseline) + one `run_history`
-  record per run (cap 20; infra failures are not recorded).
-* `code_tutor` picks the prompt by kind. The custom prompt
-  (`prompts/custom_tutor.py`) treats the statement as **untrusted data**, must
-  label claims **Verified:** vs **Hypothesis:**, must never call a `NO_TESTS` run
-  correct, and escalates hints 1→3 only when runs keep failing on the same cause.
-* `verify_code` additionally treats every function the student defined as an
-  entrypoint the tutor may not redefine (custom problems have no rubric
-  entrypoint). Word and code-block limits are unchanged.
-* `finish` for custom: *"verified against the tests you supplied"*.
+**Read this honestly.** The labels are generated by rules, so the models
+mostly relearn rules. The GRU "beats" a simple state heuristic on states the
+scenario script defines; that says nothing about real students. The booster
+loses to the rules on cause ranking, so it runs in **shadow mode**: its
+scores are shown, but it may reorder only if `metrics-v0.json` says it beat
+the rules on held-out real-choice cases. The ranker label shown is
+`rules-v1 (+ rust booster shadow)`; it would read
+`rust-gru-booster-v0 synthetic` only after a promotion. Scores are never
+called probabilities.
 
-## 5. Diagnostic ranker (step 8) — baseline only
+Fallbacks verified: `intel` down → `ranker=rules-v1`, no student state,
+tutoring unchanged; missing/corrupt/mismatched model files → 503 for that
+endpoint, rules fallback (Rust tests).
 
-`orchestrator/app/diagnostics.py`, `RANKER_VERSION = rules-v1`.
+## 7. LLM: local Ollama (owner decision, 2026-10-23)
 
-* Rules over the actual evidence: exception type + the failing line **in the
-  student's own code** (harness frames skipped), empty/None/format-only/extra
-  output on the first failing public test, loop nesting for TLE, unchanged code
-  since the previous run, and "unverified" for `NO_TESTS`.
-* Scores are rule weights for **ordering only** and are labelled
-  `"rule weight (ordering only, not a probability)"` in the API and UI.
-* `features()` emits the versioned flat feature vector
-  (`diag-features-v1`) an XGBoost ranker will train on. It contains counts and
-  statuses only — never hidden-test data — and stays server-side.
-* **XGBoost is not trained.** No labelled outcomes exist yet. Plan: log feature
-  vectors + the student's next-run outcome (opt-in), label "did the top
-  candidate's next_action precede a fix", split by problem, compare NDCG@3 /
-  top-1 against `rules-v1`, and ship only if it beats it. Rules remain the
-  fallback whenever the model is missing.
+The free OpenRouter models were withdrawn (primary "unavailable for free",
+backup 404). LiteLLM now routes `logistream-evaluator` / `logistream-tutor` to
+`logistream-qwen3` (qwen3-14b with an 8k context,
+`ollama/Modelfile.logistream-qwen3`); OpenRouter stays as the backup group.
+`think: false` is sent (80 s → 5 s on a short turn). Measured on the RTX 5050
+8 GB: VLM 3.1–3.2 s per frame (2.9 GB, 100% GPU); text model 10 GB, 42% on
+CPU; a tutor turn takes 12–28 s warm and ~66–85 s right after Ollama swapped
+the vision model out (the two do not fit in VRAM together). Timeouts: LLM
+150 s, gateway upstream 170 s.
 
-## 6. Security / privacy notes
+## 8. Tests and checks (2026-10-23)
 
-* Custom problems are private (owner check on view, context-at-start, list).
-  Ids are `custom-<uuid4>`.
-* Bind addresses are now configurable (`GATEWAY_BIND`, `ORCHESTRATOR_BIND`,
-  `DOMAIN_BIND`) but **default to all interfaces, as before**. Defaulting them
-  to 127.0.0.1 was tried and reverted: on Windows every `localhost` call to a
-  v4-only listener first spends ~2 s failing on `::1` (measured: orchestrator
-  `/health` 0.25 s → 2.3 s), which broke `start.sh`'s health probe and slowed
-  every turn. To lock down, set all three to `127.0.0.1` **and** change every
-  `localhost` URL in `.env` to `127.0.0.1`. `LocalPythonSandbox` is still
-  **not** a security sandbox: custom problems make arbitrary code execution
-  more obvious, not new. Do not expose this stack publicly.
-* Auth is still the mocked demo user (`X-Demo-User` override). Privacy between
-  users is only as strong as that mock.
-* *Reset* clears a session's conversation, runs and history (checkpoint delete).
-  Deleting a custom problem is not implemented yet.
-
-## 7. Tests
-
-| Suite | Result |
+| Check | Result |
 |---|---|
-| `orchestrator: uv run pytest` | 103 passed (18 new in `tests/test_byop.py`) |
-| `domain: mvn test` | 22 passed (`CustomProblemValidatorTest` 7, `BucketMapperTest` +2) |
-| `gateway: cargo test` | 7 passed (+ path-segment encoding) |
-| `web: npx tsc --noEmit` | clean |
-| `python -I demo/verify_byop.py --no-llm` | **37/37** end to end through :8000 (2026-10-23) |
-| Browser (built-in pane) | landing → create problem with 1 test → session at `?problem=custom-…` → run → WRONG_ANSWER row, tutor hint with real evidence, Under-the-hood diagnosis + run history |
+| `orchestrator: uv run pytest` | **120 passed** |
+| `intel: cargo test --release` | **14 passed** |
+| `gateway: cargo test` | **11 passed** |
+| `domain: mvn test` | **22 passed** |
+| `web: tsc --noEmit`, `next build` | clean; `/` prerenders static |
+| `python -I demo/verify_byop.py` (real local LLM) | **41/41** |
+| Public-mode gateway (passcode, CORS list, rate limit) | verified live on a second gateway instance |
+| Observer through gateway → Ollama | verified live (synthetic terminal frame; error read correctly; quiet, text only) |
+| `intel` down live | verified: rules fallback, tutor reply unchanged |
+| Two Sum regression `demo/rehearse.sh` | GREEN, 5 beats, 78 s |
+| `gateway/verify.sh` | 20 passed, 0 failed |
 
-### LLM outage found during verification (pre-existing, not caused by BYOP)
+## 9. Not verified / known limitations
 
-On 2026-10-23 every LLM call failed: OpenRouter reports the primary
-`qwen/qwen3.8-27b:free` *"is unavailable for free"* and the backup
-(Nvidia-hosted) returns 404. This breaks **every** tutor/evaluator turn,
-including the curated two-sum logic phase. `litellm_config.yaml` needs a new
-model choice (re-run `orchestrator/scripts/model_bakeoff.py`) — a budget
-decision left to the human.
-
-What changed because of it: `code_tutor` no longer turns an LLM failure into a
-500 that hides the run's result. It delivers `diagnostics.fallback_hint()` —
-*Verified:* bucket and counts, *Hypothesis:* the top ranked cause with its
-evidence, *Next:* its action — marked as coming from the automatic diagnosis,
-sets `fallback_used`, and still passes through `verify_code`. The verify run
-above exercised exactly this path; the LLM-written custom tutor turns are
-**not yet verified live**. `evaluate_logic` is unchanged and still fails loudly
-(it must never default a verdict).
-
-## 8. Not done yet (Level 2 / Level 3, in plan order)
-
-1. **Screen observer** — visible, pausable capture in the UI (`getDisplayMedia`
-   with a persistent indicator), sampled every N s + on run/error events,
-   downscaled, never stored raw by default.
-2. **Ollama VLM** — pull a vision model (Qwen2.5-VL 3B candidate; check it fits
-   8 GB alongside nothing else and measure latency), add an `interpret_context`
-   step that turns a frame + previous summary into a compact observation with a
-   timestamp. Disabled/“manual” fallback if Ollama is down; never a cloud API.
-3. **Observation merge** — observations join `run_history` as a second event
-   kind; stale ones (older than the latest run) are marked and cannot override
-   sandbox results.
-4. **XGBoost** — as in §5, once data exists.
-
-## 9. Rollback
-
-Everything is on the feature branch. To roll back: `git switch main`. The schema
-change is additive; old code ignores the new columns, so no DB rollback is
-needed. Custom rows can be removed with
-`DELETE FROM app.hidden_tests WHERE problem_id LIKE 'custom-%'; DELETE FROM app.problems WHERE kind='custom';`.
+* **Document PiP in real Chrome is not verified.** The Claude browser pane
+  exposes the API but would not open the window; the in-page fallback was
+  verified there. Test in Chrome 116+ from a click on **Assistant**.
+* **Real `getDisplayMedia` capture is not verified** (the embedded pane cannot
+  share a screen). The pipeline behind it was verified with a synthetic frame.
+* **Voice** (Web Speech) and read-aloud are not verified; both are opt-in and
+  off by default. Chrome sends recognition audio to Google, and the panel says
+  so.
+* **The Vercel deploy and Cloudflare tunnel have not been run** — by design;
+  the owner pushes and deploys (`demo/DEPLOY_VERCEL.md`). Quick tunnels cut
+  responses at ~100 s, which a cold local turn can approach.
+* Free-form Python only; `LocalPythonSandbox` is not a security sandbox.
+* Custom problems cannot be deleted from the UI yet; reset clears a session.
+* `X-Demo-User` is client-supplied (an unguessable random id per browser), so
+  isolation is only as strong as the mocked auth.
