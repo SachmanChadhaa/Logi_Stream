@@ -39,6 +39,7 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
   const dbg = view?.debug;
   const dx = view?.diagnosis;
   const runs = dbg?.run_history;
+  const tm = view?.temporal;
 
   const verdictColour =
     ev?.verdict === "PASS"
@@ -230,6 +231,44 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
                   ) : (
                     NONE
                   )}
+                </>
+              )}
+
+              {tm && (tm.summary || tm.events.length > 0) && (
+                <>
+                  <h3 className="mt-3 mb-1 font-semibold text-[var(--foreground)]">
+                    Temporal memory{" "}
+                    <span className="font-mono text-[10px] font-normal text-[var(--muted)]">
+                      rev {tm.code_revision} · {tm.ranker}
+                    </span>
+                  </h3>
+                  <p className="mb-1">{tm.summary}</p>
+                  {tm.student_state && (
+                    <Row label="student state" mono>
+                      {tm.student_state.label}{" "}
+                      <span className="text-[var(--muted)]">
+                        ({tm.student_state.model_version}, synthetic-trained, unvalidated)
+                      </span>
+                    </Row>
+                  )}
+                  {tm.hypotheses.length > 0 && (
+                    <Row label="open hypotheses">
+                      <ul className="list-disc space-y-0.5 pl-4">
+                        {tm.hypotheses.map((h, i) => (
+                          <li key={i}>{h}</li>
+                        ))}
+                      </ul>
+                    </Row>
+                  )}
+                  {tm.next_action && <Row label="next action">{tm.next_action}</Row>}
+                  <ul className="mt-1 space-y-0.5 font-mono text-[10px]">
+                    {tm.events.slice(-8).map((e, i) => (
+                      <li key={i} className={e.stale ? "text-[var(--muted)] line-through decoration-[var(--border-strong)]" : ""}>
+                        {new Date(e.ts).toLocaleTimeString()} [{e.kind}, rev {e.code_revision}
+                        {e.stale ? ", seen earlier" : e.source === "screen" ? ", seen on screen" : ""}] {e.text}
+                      </li>
+                    ))}
+                  </ul>
                 </>
               )}
 

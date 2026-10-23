@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { Assistant, openPipWindow } from "@/components/Assistant";
+
 import { ChatPanel } from "@/components/ChatPanel";
 import { Header } from "@/components/Header";
 import { NewProblemForm } from "@/components/NewProblemForm";
@@ -11,6 +13,7 @@ import { TestDrawer } from "@/components/TestDrawer";
 import { UnderTheHood } from "@/components/UnderTheHood";
 import { BusyBar, WorkPane } from "@/components/WorkPane";
 import { ApiError, api } from "@/lib/api";
+import { useScreenObserver } from "@/lib/screenObserver";
 import type { Problem, SessionView } from "@/lib/types";
 
 // The open problem lives in the URL (?problem=<id>), so a refresh resumes the
@@ -74,6 +77,10 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
   const [notFound, setNotFound] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [pipWindow, setPipWindow] = useState<Window | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [code, setCode] = useState("");
 
   const lastTutorCount = useRef(0);
 
@@ -167,6 +174,39 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
   const isBusy = busy !== null;
   const done = view?.phase === "DONE";
 
+  const observer = useScreenObserver({
+    problemId,
+    codeRevision: view?.temporal?.code_revision ?? 0,
+    canSend: !isBusy && !!view && !done,
+    onView: setView,
+  });
+
+  // after a run, look at the screen once more (the run may have changed what
+  // the student sees) -- a tick later, once the busy flag has cleared
+  const lastRunBucket = useRef<string | null>(null);
+  useEffect(() => {
+    const b = view?.last_execution?.bucket ?? null;
+    const rev = view?.temporal?.code_revision;
+    if (b && rev && `${rev}` !== lastRunBucket.current && observer.state === "on") {
+      lastRunBucket.current = `${rev}`;
+      const t = setTimeout(() => observer.sample(b === "ACCEPTED" ? "run" : "error"), 400);
+      return () => clearTimeout(t);
+    }
+  }, [view, observer]);
+
+  const closeAssistant = useCallback(() => {
+    setAssistantOpen(false);
+    setPipWindow((w) => {
+      w?.close();
+      return null;
+    });
+    if (observer.state !== "off") {
+      setNotice("Screen capture is still on. Stop it from the header when you are done.");
+    }
+  }, [observer.state]);
+  const closeRef = useRef(closeAssistant);
+  closeRef.current = closeAssistant;
+
   if (notFound) {
     return (
       <div className="flex h-screen flex-col overflow-hidden">
@@ -186,7 +226,35 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <Header view={view} busy={isBusy} onReset={onReset} onHome={onHome} />
+      <Header
+        view={view}
+        busy={isBusy}
+        onReset={onReset}
+        onHome={() => {
+          observer.stop();
+          onHome();
+        }}
+        onAssistant={async () => {
+          if (assistantOpen) return;
+          // straight from the click: Chrome only opens PiP inside a user gesture
+          // closing the PiP window goes through closeAssistant too, so a live
+          // capture is never ended -- or forgotten -- silently
+          const w = await openPipWindow(() => closeRef.current());
+          setPipWindow(w);
+          setAssistantOpen(true);
+        }}
+        capture={observer.state}
+        onStopCapture={observer.stop}
+      />
+
+      {notice && (
+        <div role="status" className="shrink-0 border-b border-[var(--warn)] bg-[var(--surface-2)] px-5 py-2 text-xs text-[var(--warn)]">
+          {notice}
+          <button onClick={() => setNotice(null)} className="ml-3 underline opacity-70 hover:opacity-100">
+            dismiss
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="shrink-0 border-b border-[var(--fail)] bg-[var(--fail-bg)] px-5 py-2 text-xs text-[var(--fail)]">
@@ -221,6 +289,7 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
             busy={isBusy}
             onSubmitLogic={(t) => send("logic", t)}
             onSubmitCode={(t) => send("code", t)}
+            onCodeChange={setCode}
           />
 
           <TestDrawer execution={view?.last_execution ?? null} />
@@ -238,6 +307,17 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
       </main>
 
       <UnderTheHood view={view} />
+
+      <Assistant
+        open={assistantOpen}
+        pipWindow={pipWindow}
+        onClose={closeAssistant}
+        view={view}
+        code={code}
+        busy={isBusy}
+        onSend={(t) => send("chat", t)}
+        observer={observer}
+      />
     </div>
   );
 }

@@ -50,7 +50,9 @@ export function WorkPane({
   busy,
   onSubmitLogic,
   onSubmitCode,
+  onCodeChange,
 }: {
+  onCodeChange?: (code: string) => void;
   view: SessionView | null;
   starterCode: string;
   testCount?: number;
@@ -61,6 +63,12 @@ export function WorkPane({
   const [logic, setLogic] = useState("");
   const [code, setCode] = useState("");
   const seededRef = useRef(false);
+
+  // the assistant's "+ attach current code" needs what is in the editor now,
+  // not what was last run
+  useEffect(() => {
+    onCodeChange?.(code);
+  }, [code, onCodeChange]);
 
   const phase = view?.phase ?? "LOGIC";
   const done = phase === "DONE";

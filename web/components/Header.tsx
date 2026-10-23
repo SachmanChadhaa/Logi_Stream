@@ -25,11 +25,18 @@ export function Header({
   busy,
   onReset,
   onHome,
+  onAssistant,
+  capture,
+  onStopCapture,
 }: {
   view: SessionView | null;
   busy: boolean;
   onReset?: () => void;
   onHome?: () => void;
+  onAssistant?: () => void;
+  /** the main-tab capture indicator: always visible while sharing is live */
+  capture?: "off" | "starting" | "on" | "paused";
+  onStopCapture?: () => void;
 }) {
   const phase = view?.phase ?? "LOGIC";
   const custom = view?.problem_kind === "custom";
@@ -95,6 +102,28 @@ export function Header({
       )}
 
       <div className="ml-auto flex items-center gap-4 text-xs text-[var(--muted)]">
+        {capture && capture !== "off" && (
+          <span
+            role="status"
+            className="flex items-center gap-1.5 rounded-full border border-[var(--fail)] px-2 py-0.5 text-[var(--fail)]"
+          >
+            <span className={`h-2 w-2 rounded-full bg-[var(--fail)] ${capture === "on" ? "dot" : "opacity-50"}`} />
+            {capture === "paused" ? "capture paused" : capture === "starting" ? "choosing window…" : "screen capture on"}
+            {onStopCapture && (
+              <button onClick={onStopCapture} className="ml-1 underline" aria-label="Stop screen capture">
+                stop
+              </button>
+            )}
+          </span>
+        )}
+        {onAssistant && view && (
+          <button
+            onClick={onAssistant}
+            className="rounded border border-[var(--accent)] px-3 py-1 text-xs text-[var(--accent)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--on-accent)]"
+          >
+            Assistant
+          </button>
+        )}
         {view && (
         <span title="How many times logic and code have been submitted">
           attempts&nbsp;
