@@ -4,12 +4,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app import domain_client
+from app import diagnostics, domain_client
 from app.state import SessionState, message
 
 log = logging.getLogger(__name__)
 
 INFRA_MESSAGE = "The sandbox failed; this attempt does not count. Please try again."
+NO_TESTS_MESSAGE = (
+    "NO_TESTS: your program ran, but this problem has no tests, so nothing was "
+    "verified. Add a test (input + expected output) to check it for real."
+)
+MAX_RUN_HISTORY = 20
 
 
 def execute_code(state: SessionState) -> dict[str, Any]:
@@ -48,8 +53,27 @@ def execute_code(state: SessionState) -> dict[str, Any]:
         "node_path": node_path,
     }
 
+    # Rules-baseline diagnosis plus one temporal-memory record per run. Both are
+    # deterministic and side-effect free, so this is safe inside the node. An
+    # infra failure says nothing about the student's code, so it is not recorded.
+    if bucket != "INFRA_ERROR":
+        history = list(state.get("run_history") or [])
+        diagnosis = diagnostics.rank(
+            execution, source, history,
+            problem_kind=state.get("problem_kind") or "curated",
+        )
+        entry = diagnostics.history_entry(
+            execution, source, diagnosis, message("system", "info", "")["ts"])
+        update["last_diagnosis"] = diagnosis
+        update["run_history"] = (history + [entry])[-MAX_RUN_HISTORY:]
+        log.info("execute_code diagnosis ranker=%s top=%s",
+                 diagnosis["ranker"],
+                 [c["id"] for c in diagnosis["candidates"]])
+
     if bucket == "INFRA_ERROR":
         update["messages"] = [message("system", "info", INFRA_MESSAGE)]
+    elif bucket == "NO_TESTS":
+        update["messages"] = [message("system", "result", NO_TESTS_MESSAGE)]
     else:
         passed, total = execution.get("passed", 0), execution.get("total", 0)
         update["messages"] = [

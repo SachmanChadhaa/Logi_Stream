@@ -182,7 +182,20 @@ def verify_logic_draft(draft: str, rubric: dict[str, Any]) -> VerificationResult
     return VerificationResult(not rejections, rejections)
 
 
-def verify_code_draft(draft: str, rubric: dict[str, Any]) -> VerificationResult:
+_DEF_NAME_RE = re.compile(r"^\s*def\s+([A-Za-z_]\w*)", re.MULTILINE)
+
+
+def defined_functions(student_code: str) -> list[str]:
+    """Function names the student defined. A custom problem has no rubric
+    entrypoint, so these stand in for it: the tutor must not redefine them."""
+    return sorted(set(_DEF_NAME_RE.findall(student_code or "")))
+
+
+def verify_code_draft(
+    draft: str,
+    rubric: dict[str, Any],
+    extra_entrypoints: list[str] | None = None,
+) -> VerificationResult:
     """Verify a code-phase tutor turn.
 
     Here the tutor may quote a short piece of the student's own code and name the
@@ -196,9 +209,10 @@ def verify_code_draft(draft: str, rubric: dict[str, Any]) -> VerificationResult:
         _reject(rejections, "draft is empty")
         return VerificationResult(False, rejections)
 
-    entrypoint = rubric.get("entrypoint")
-    if entrypoint and re.search(r"\bdef\s+" + re.escape(entrypoint) + r"\b", text):
-        _reject(rejections, f"draft defines the entrypoint 'def {entrypoint}'")
+    entrypoints = [e for e in [rubric.get("entrypoint"), *(extra_entrypoints or [])] if e]
+    for entrypoint in dict.fromkeys(entrypoints):
+        if re.search(r"\bdef\s+" + re.escape(entrypoint) + r"\b", text):
+            _reject(rejections, f"draft defines the entrypoint 'def {entrypoint}'")
 
     run = _longest_code_run(text)
     if run > MAX_CODE_BLOCK_LINES:

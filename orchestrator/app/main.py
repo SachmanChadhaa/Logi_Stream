@@ -114,10 +114,23 @@ def start(thread_id: str, body: StartBody) -> dict[str, Any]:
         return _view(g, cfg, thread_id)
 
     user_id = body.user_id or "demo-user"
-    log.info("start: new session thread=%s problem=%s user=%s",
-             thread_id, body.problem_id, user_id)
+
+    # Ownership is checked here, once, before a thread exists: Java returns 404
+    # for an unknown id and for someone else's custom problem alike.
+    try:
+        ctx = domain_client.get_problem_context(
+            body.problem_id, trace_id=tracing.get_trace_id(), user_id=user_id)
+    except domain_client.ProblemNotFound:
+        raise HTTPException(status_code=404, detail=f"unknown problem: {body.problem_id}")
+    except domain_client.DomainError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    kind = "custom" if ctx.get("kind") == "custom" else "curated"
+    log.info("start: new session thread=%s problem=%s kind=%s user=%s",
+             thread_id, body.problem_id, kind, user_id)
     # runs until the interrupt in await_input
-    g.invoke(initial_state(body.problem_id, user_id, thread_id), cfg)
+    g.invoke(initial_state(body.problem_id, user_id, thread_id,
+                           kind=kind, starter_code=ctx.get("starter_code") or ""), cfg)
     return _view(g, cfg, thread_id)
 
 

@@ -37,6 +37,8 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
   const ev = view?.last_eval;
   const ex = view?.last_execution;
   const dbg = view?.debug;
+  const dx = view?.diagnosis;
+  const runs = dbg?.run_history;
 
   const verdictColour =
     ev?.verdict === "PASS"
@@ -85,7 +87,9 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
               </h3>
               {!ev ? (
                 <p className="text-[var(--muted)]">
-                  No logic evaluated yet.
+                  {view?.problem_kind === "custom"
+                    ? "Your own problem has no rubric, so there is no logic gate. The tutor works from your statement, code and runs."
+                    : "No logic evaluated yet."}
                 </p>
               ) : (
                 <>
@@ -193,6 +197,56 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
                   <Row label="passed" mono>
                     {ex.passed}/{ex.total}
                   </Row>
+                </>
+              )}
+
+              {dx && (
+                <>
+                  <h3 className="mt-3 mb-1 font-semibold text-[var(--foreground)]">
+                    Diagnosis{" "}
+                    <span className="font-mono text-[10px] font-normal text-[var(--muted)]">
+                      {dx.ranker}
+                    </span>
+                  </h3>
+                  <p className="mb-1 text-[10px] text-[var(--muted)]">
+                    Advisory ranking; scores are {dx.score_kind}.
+                  </p>
+                  {dx.candidates.length ? (
+                    <ol className="list-decimal space-y-1 pl-4">
+                      {dx.candidates.map((c) => (
+                        <li key={c.id}>
+                          <span className="font-mono">{c.id}</span>{" "}
+                          <span className="font-mono text-[var(--muted)]">({c.score})</span>
+                          <div>{c.cause}</div>
+                          {c.evidence.map((e, i) => (
+                            <div key={i} className="font-mono text-[10px] text-[var(--muted)]">
+                              evidence: {e}
+                            </div>
+                          ))}
+                          <div className="text-[var(--accent)]">next: {c.next_action}</div>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    NONE
+                  )}
+                </>
+              )}
+
+              {!!runs?.length && (
+                <>
+                  <h3 className="mt-3 mb-1 font-semibold text-[var(--foreground)]">
+                    Run history
+                  </h3>
+                  <ul className="space-y-0.5 font-mono text-[10px]">
+                    {runs.slice(-6).map((r, i) => (
+                      <li key={i}>
+                        {new Date(r.ts).toLocaleTimeString()} {r.bucket} {r.passed}/{r.total}
+                        {" · "}code {r.code_sha} · {r.top_cause ?? "—"}
+                        {r.verified ? "" : " · unverified"}
+                      </li>
+                    ))}
+                  </ul>
                 </>
               )}
             </div>

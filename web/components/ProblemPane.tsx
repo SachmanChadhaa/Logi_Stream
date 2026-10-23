@@ -123,9 +123,27 @@ export function ProblemPane({
         ) : (
           <div>
             <h1 className="mb-3 text-xl font-semibold">{problem.title}</h1>
-            <div className="space-y-1">{renderMarkdown(problem.description)}</div>
+            {problem.kind === "custom" ? (
+              // the student's own text: keep their line breaks exactly
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                {problem.description}
+              </p>
+            ) : (
+              <div className="space-y-1">{renderMarkdown(problem.description)}</div>
+            )}
 
-            <h2 className="mt-6 mb-2 text-sm font-semibold">Examples</h2>
+            {problem.constraints && (
+              <>
+                <h2 className="mt-6 mb-2 text-sm font-semibold">Constraints</h2>
+                <p className="whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--surface-2)] p-3 font-mono text-xs">
+                  {problem.constraints}
+                </p>
+              </>
+            )}
+
+            {problem.examples.length > 0 && (
+              <h2 className="mt-6 mb-2 text-sm font-semibold">Examples</h2>
+            )}
             <div className="space-y-3">
               {problem.examples.map((ex, i) => (
                 <div
@@ -133,7 +151,7 @@ export function ProblemPane({
                   className="rounded border border-[var(--border)] bg-[var(--surface-2)] p-3"
                 >
                   <div className="font-mono text-xs">
-                    <div>
+                    <div className="whitespace-pre-wrap">
                       <span className="text-[var(--muted)]">input&nbsp;&nbsp;</span>
                       {ex.input}
                     </div>
@@ -142,9 +160,11 @@ export function ProblemPane({
                       <span className="text-[var(--accent)]">{ex.output}</span>
                     </div>
                   </div>
-                  <p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">
-                    {ex.explanation}
-                  </p>
+                  {ex.explanation && (
+                    <p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">
+                      {ex.explanation}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>

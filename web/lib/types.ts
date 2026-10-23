@@ -19,7 +19,11 @@ export type Bucket =
   | "TLE"
   | "COMPILE_ERROR"
   | "RUNTIME_ERROR"
-  | "INFRA_ERROR";
+  | "INFRA_ERROR"
+  // bring-your-own-problem with no tests: it ran, nothing was compared
+  | "NO_TESTS";
+
+export type ProblemKind = "curated" | "custom";
 
 export interface Message {
   role: "student" | "tutor" | "system";
@@ -65,6 +69,34 @@ export interface DebugInfo {
   regenerations: number;
   verifier_rejections: { reason: string }[];
   fallback_used: boolean;
+  run_history?: RunRecord[];
+}
+
+/** One compact temporal-memory record per run (no test data, no code). */
+export interface RunRecord {
+  ts: string;
+  bucket: Bucket;
+  passed: number;
+  total: number;
+  code_sha: string;
+  top_cause: string | null;
+  verified: boolean;
+}
+
+/** Rules-baseline diagnosis. Scores order candidates; they are not probabilities. */
+export interface DiagnosisCandidate {
+  id: string;
+  cause: string;
+  next_action: string;
+  score: number;
+  evidence: string[];
+}
+
+export interface Diagnosis {
+  ranker: string;
+  score_kind: string;
+  bucket: Bucket;
+  candidates: DiagnosisCandidate[];
 }
 
 export interface SessionView {
@@ -78,6 +110,9 @@ export interface SessionView {
   last_eval: LastEval | null;
   last_execution: LastExecution | null;
   debug: DebugInfo;
+  // additive (bring-your-own-problem); absent from older servers
+  problem_kind?: ProblemKind;
+  diagnosis?: Diagnosis | null;
 }
 
 export interface ProblemExample {
@@ -93,4 +128,26 @@ export interface Problem {
   examples: ProblemExample[];
   starter_code: string;
   language: string;
+  kind?: ProblemKind;
+  constraints?: string;
+  test_count?: number;
+}
+
+export interface ProblemSummary {
+  id: string;
+  title: string;
+  kind: ProblemKind;
+  language: string;
+  created_at: string;
+}
+
+/** POST /api/problems. Java validates; these limits mirror it for early feedback. */
+export interface NewProblem {
+  title?: string;
+  statement: string;
+  constraints?: string;
+  examples?: { input: string; output: string; explanation?: string }[];
+  starter_code?: string;
+  language: string;
+  tests?: { label?: string; input: string; expected_output: string }[];
 }

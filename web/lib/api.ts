@@ -4,7 +4,7 @@
 // the problem, and ignores any the client supplies. Sending one from here would
 // be pointless as well as wrong.
 
-import type { Problem, SessionView } from "./types";
+import type { NewProblem, Problem, ProblemSummary, SessionView } from "./types";
 
 const GATEWAY =
   process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8000";
@@ -66,7 +66,16 @@ async function request<T>(
 
 export const api = {
   getProblem: (problemId: string) =>
-    request<Problem>(`/api/problems/${problemId}`),
+    request<Problem>(`/api/problems/${encodeURIComponent(problemId)}`),
+
+  listProblems: () =>
+    request<{ problems: ProblemSummary[] }>("/api/problems"),
+
+  createProblem: (p: NewProblem) =>
+    request<Problem>("/api/problems", {
+      method: "POST",
+      body: JSON.stringify(p),
+    }),
 
   start: (problemId: string) =>
     request<SessionView>("/api/sessions/start", {
@@ -87,7 +96,7 @@ export const api = {
     }),
 
   get: (problemId: string) =>
-    request<SessionView>(`/api/sessions/${problemId}`),
+    request<SessionView>(`/api/sessions/${encodeURIComponent(problemId)}`),
 };
 
 export { GATEWAY };

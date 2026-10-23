@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatPanel } from "@/components/ChatPanel";
 import { Header } from "@/components/Header";
+import { NewProblemForm } from "@/components/NewProblemForm";
 import { ProblemPane } from "@/components/ProblemPane";
 import { TestDrawer } from "@/components/TestDrawer";
 import { UnderTheHood } from "@/components/UnderTheHood";
@@ -11,7 +12,13 @@ import { BusyBar, WorkPane } from "@/components/WorkPane";
 import { ApiError, api } from "@/lib/api";
 import type { Problem, SessionView } from "@/lib/types";
 
-const PROBLEM_ID = "two-sum";
+// The open problem lives in the URL (?problem=<id>), so a refresh resumes the
+// same session and a sample link like ?problem=two-sum works for the demo.
+// No problem in the URL means the landing page: bring your own problem.
+function readProblemParam(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("problem");
+}
 
 type BusyKind = "logic" | "chat" | "code" | "reset" | "load" | null;
 
@@ -24,12 +31,46 @@ const BUSY_LABEL: Record<Exclude<BusyKind, null>, string> = {
 };
 
 export default function Page() {
+  // undefined until the URL has been read on the client
+  const [problemId, setProblemId] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    setProblemId(readProblemParam());
+    const onPop = () => setProblemId(readProblemParam());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const open = useCallback((id: string | null) => {
+    const url = id ? `?problem=${encodeURIComponent(id)}` : window.location.pathname;
+    window.history.pushState(null, "", url);
+    setProblemId(id);
+  }, []);
+
+  if (problemId === undefined) return <div className="h-screen" />;
+
+  if (problemId === null) {
+    return (
+      <div className="flex h-screen flex-col overflow-hidden">
+        <Header view={null} busy={false} />
+        <NewProblemForm onOpen={open} />
+      </div>
+    );
+  }
+
+  // keyed so switching problems starts from a clean slate
+  return <Session key={problemId} problemId={problemId} onHome={() => open(null)} />;
+}
+
+function Session({ problemId, onHome }: { problemId: string; onHome: () => void }) {
   const [problem, setProblem] = useState<Problem | null>(null);
   const [view, setView] = useState<SessionView | null>(null);
   const [busy, setBusy] = useState<BusyKind>(null);
   const [busySince, setBusySince] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   const lastTutorCount = useRef(0);
 
@@ -58,8 +99,8 @@ export default function Page() {
       begin("load");
       try {
         const [p, v] = await Promise.all([
-          api.getProblem(PROBLEM_ID),
-          api.start(PROBLEM_ID),
+          api.getProblem(problemId),
+          api.start(problemId),
         ]);
         if (cancelled) return;
         setProblem(p);
@@ -68,7 +109,9 @@ export default function Page() {
           (m) => m.role === "tutor",
         ).length;
       } catch (e) {
-        if (!cancelled) fail(e);
+        if (cancelled) return;
+        if (e instanceof ApiError && e.status === 404) setNotFound(true);
+        fail(e);
       } finally {
         if (!cancelled) setBusy(null);
       }
@@ -76,7 +119,7 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [problemId, attempt]);
 
   // open the chat by itself whenever a NEW tutor message arrives
   useEffect(() => {
@@ -93,21 +136,21 @@ export default function Page() {
       if (!text.trim()) return;
       begin(kind);
       try {
-        setView(await api.event(PROBLEM_ID, kind, text));
+        setView(await api.event(problemId, kind, text));
       } catch (e) {
         fail(e);
       } finally {
         setBusy(null);
       }
     },
-    [],
+    [problemId],
   );
 
   const onReset = useCallback(async () => {
     begin("reset");
     try {
-      await api.reset(PROBLEM_ID);
-      const v = await api.start(PROBLEM_ID);
+      await api.reset(problemId);
+      const v = await api.start(problemId);
       setView(v);
       lastTutorCount.current = 0;
       setChatOpen(false);
@@ -116,18 +159,43 @@ export default function Page() {
     } finally {
       setBusy(null);
     }
-  }, []);
+  }, [problemId]);
 
   const isBusy = busy !== null;
   const done = view?.phase === "DONE";
 
+  if (notFound) {
+    return (
+      <div className="flex h-screen flex-col overflow-hidden">
+        <Header view={null} busy={false} onHome={onHome} />
+        <div className="mx-auto mt-16 max-w-md px-4 text-center">
+          <h1 className="font-serif text-xl font-semibold">Problem not found</h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            It does not exist, or it belongs to someone else.
+          </p>
+          <button onClick={onHome} className="mt-4 rounded bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)]">
+            Back to problems
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <Header view={view} busy={isBusy} onReset={onReset} />
+      <Header view={view} busy={isBusy} onReset={onReset} onHome={onHome} />
 
       {error && (
         <div className="shrink-0 border-b border-[var(--fail)] bg-[var(--fail-bg)] px-5 py-2 text-xs text-[var(--fail)]">
           {error}
+          {!view && (
+            <button
+              onClick={() => setAttempt((a) => a + 1)}
+              className="ml-3 underline opacity-70 hover:opacity-100"
+            >
+              retry
+            </button>
+          )}
           <button
             onClick={() => setError(null)}
             className="ml-3 underline opacity-70 hover:opacity-100"
@@ -146,6 +214,7 @@ export default function Page() {
           <WorkPane
             view={view}
             starterCode={problem?.starter_code ?? ""}
+            testCount={problem?.test_count}
             busy={isBusy}
             onSubmitLogic={(t) => send("logic", t)}
             onSubmitCode={(t) => send("code", t)}
@@ -159,7 +228,7 @@ export default function Page() {
             onOpenChange={setChatOpen}
             onSend={(t) => send("chat", t)}
             busy={busy === "chat"}
-            disabled={isBusy || done}
+            disabled={isBusy || done || !view}
             done={done}
           />
         </section>

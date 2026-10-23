@@ -89,7 +89,9 @@ def summarize_for_tutor(execution: dict[str, Any] | None) -> str:
         if t.get("is_public"):
             lines.append(f"- [{mark}] test {t.get('index')} '{t.get('label')}' ({status}) [public]")
             lines.append(f"    input    : {t.get('stdin')}")
-            lines.append(f"    expected : {t.get('expected')}")
+            expected = t.get("expected")
+            lines.append("    expected : (none -- no tests, nothing compared)" if expected is None
+                         else f"    expected : {expected}")
             lines.append(f"    got      : {(t.get('stdout') or '').strip() or '(nothing)'}")
         else:
             # label and outcome only -- never the data

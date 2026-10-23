@@ -1,9 +1,20 @@
 server:
   port: 8080
+  # /internal/execute runs arbitrary student code with this service's privileges
+  # (LocalPythonSandbox is not a security sandbox). Never expose this port. Set
+  # DOMAIN_BIND=127.0.0.1 to lock it down -- see .env.example for why the URLs
+  # must then say 127.0.0.1 too.
+  address: ${DOMAIN_BIND:0.0.0.0}
 
 spring:
   application:
     name: logistream-domain
+  sql:
+    init:
+      # idempotent ALTERs for bring-your-own-problem; see the file's header
+      mode: always
+      schema-locations: classpath:schema-byop.sql
+      continue-on-error: false
   datasource:
     # Java does not read .env; the start scripts do `set -a; source .env; set +a`.
     url: ${DATABASE_URL_JDBC:jdbc:postgresql://localhost:5432/logistream}

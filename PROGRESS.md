@@ -251,3 +251,17 @@ often enough to be worth pointing at on stage.
 | 5 | **LiteLLM reintroduced** (CLAUDE.md §3 had deferred it) | Free-tier 429s need automatic failover | Positive: restores the full-spec component and decouples model names from vendors. |
 | 6 | Models are free-tier OpenRouter, not paid | Zero budget | Slower turns (18–92 s) and occasional 429s. See Risk #1 above. |
 | 7 | §6.4 code-line rules tightened with two extra patterns | Human-approved 2026-09-21 | Closes the colonless `return [` / `import x` gap; guarded against prose false positives. |
+| 8 | **Bring-your-own-problem** (`feature/bring-your-own-problem`, 2026-10-23) | Human brief `CLAUDE_IMPLEMENTATION_PLAN.md` | Additive contract changes to §5.1/5.2/5.4 (new problem routes, `problem_kind`, `diagnosis`, `run_history`, `NO_TESTS` bucket). Custom problems skip the logic gate (no rubric). Full write-up: `docs/BYOP.md`. |
+
+## BYOP (2026-10-23) — status
+
+| Item | Status |
+|---|---|
+| Audit, branch, baseline (85 / 13 / 6 / tsc clean) | ✅ |
+| Custom-problem contract (Java validate/store, gateway routes, ownership) | ✅ |
+| Generalized tutor (custom prompt, ownership at start, diagnosis + run history) | ✅ |
+| Frontend landing form + `?problem=` sessions, sample kept | ✅ |
+| Tests: pytest 103, mvn 22, cargo 7, tsc clean, `demo/verify_byop.py --no-llm` **37/37**, browser run | ✅ |
+| **LLM outage**: primary free model withdrawn, backup 404 — all LLM turns fail (curated too) | 🔴 needs the human: new model choice |
+| Screen observer, Ollama VLM, XGBoost training | ⏳ not started (plan Level 2/3; see `docs/BYOP.md` §8) |
+| Committed | ❌ not committed — the brief requires explicit authorization |

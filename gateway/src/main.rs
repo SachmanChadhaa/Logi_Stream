@@ -106,15 +106,74 @@ async fn health() -> impl IntoResponse {
     Json(json!({ "ok": true, "service": "logistream-gateway" }))
 }
 
+/// A problem's browser-safe view. Goes through Java's internal route with the
+/// resolved user, because a student's own problem is private: Java returns 404
+/// for anyone but its owner. Curated samples are visible to everyone.
 async fn get_problem(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(problem_id): Path<String>,
 ) -> Response {
     let trace_id = resolve_trace_id(&headers);
-    let url = format!("{}/problems/{}", state.domain_url, problem_id);
+    let user_id = resolve_user(&headers, &state);
+    let url = format!(
+        "{}/internal/problems/{}/view",
+        state.domain_url,
+        encode_path_segment(&problem_id)
+    );
     info!(trace_id = %trace_id, problem_id = %problem_id, "GET problem");
-    proxy(&state, reqwest::Method::GET, &url, None, &trace_id, None).await
+    proxy(&state, reqwest::Method::GET, &url, None, &trace_id, Some(&user_id)).await
+}
+
+/// Curated samples plus this user's own problems.
+async fn list_problems(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let trace_id = resolve_trace_id(&headers);
+    let user_id = resolve_user(&headers, &state);
+    let url = format!("{}/internal/problems", state.domain_url);
+    info!(trace_id = %trace_id, user_id = %user_id, "list problems");
+    proxy(&state, reqwest::Method::GET, &url, None, &trace_id, Some(&user_id)).await
+}
+
+/// Bring your own problem. The body is passed through for Java to validate
+/// (Java owns the limits); the owner is the resolved user, sent as a header,
+/// so nothing in the body can create a problem on someone else's behalf.
+async fn create_problem(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let trace_id = resolve_trace_id(&headers);
+    let user_id = resolve_user(&headers, &state);
+    if !body.is_object() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "detail": "body must be a JSON object" })),
+        )
+            .into_response();
+    }
+    info!(trace_id = %trace_id, user_id = %user_id, "create problem");
+    let url = format!("{}/internal/problems", state.domain_url);
+    proxy(
+        &state,
+        reqwest::Method::POST,
+        &url,
+        Some(body),
+        &trace_id,
+        Some(&user_id),
+    )
+    .await
+}
+
+/// Problem ids end up in an upstream URL path. Curated ids and `custom-<uuid>`
+/// only ever use [A-Za-z0-9-_], so anything else is percent-encoded rather than
+/// trusted to stay inside its path segment.
+fn encode_path_segment(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 async fn start_session(
@@ -248,7 +307,21 @@ async fn proxy(
         Ok(upstream) => {
             let status = StatusCode::from_u16(upstream.status().as_u16())
                 .unwrap_or(StatusCode::BAD_GATEWAY);
-            let bytes = upstream.bytes().await.unwrap_or_else(|_| Bytes::new());
+            let mut bytes = upstream.bytes().await.unwrap_or_else(|_| Bytes::new());
+
+            // Java says {"error": ...}, Python says {"detail": ...}. The UI reads
+            // `detail`, so an error body without one gets it copied in. Success
+            // bodies are passed through byte for byte.
+            if !status.is_success() {
+                if let Ok(Value::Object(mut obj)) = serde_json::from_slice::<Value>(&bytes) {
+                    if !obj.contains_key("detail") {
+                        if let Some(err) = obj.get("error").cloned() {
+                            obj.insert("detail".into(), err);
+                            bytes = Bytes::from(Value::Object(obj).to_string());
+                        }
+                    }
+                }
+            }
 
             let mut response = Response::builder()
                 .status(status)
@@ -306,6 +379,11 @@ async fn main() {
         .init();
 
     let port: u16 = env_or("GATEWAY_PORT", "8000").parse().unwrap_or(8000);
+    // Everything behind this gateway, student code execution included, is meant
+    // for one local user. GATEWAY_BIND=127.0.0.1 locks it to loopback (then use
+    // 127.0.0.1, not localhost, in the URLs: on Windows a localhost call to a
+    // v4-only listener first spends ~2s failing on ::1).
+    let bind = env_or("GATEWAY_BIND", "0.0.0.0");
     let cors_origin = env_or("CORS_ORIGIN", "http://localhost:3000");
 
     let state = AppState {
@@ -339,6 +417,7 @@ async fn main() {
     // startup rather than failing to compile (trap 5).
     let app = Router::new()
         .route("/health", get(health))
+        .route("/api/problems", get(list_problems).post(create_problem))
         .route("/api/problems/{problem_id}", get(get_problem))
         .route("/api/sessions/start", post(start_session))
         .route("/api/sessions/event", post(session_event))
@@ -348,7 +427,7 @@ async fn main() {
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state.clone());
 
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("{bind}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("cannot bind {addr}: {e}"));
@@ -423,5 +502,16 @@ mod tests {
         .expect("unknown fields must be ignored");
         assert_eq!(body.problem_id, "two-sum");
         assert_eq!(body.event_type, "logic");
+    }
+
+    #[test]
+    fn path_segments_cannot_escape() {
+        assert_eq!(encode_path_segment("two-sum"), "two-sum");
+        assert_eq!(
+            encode_path_segment("custom-0f8e1c2a-aaaa-bbbb-cccc-1234567890ab"),
+            "custom-0f8e1c2a-aaaa-bbbb-cccc-1234567890ab"
+        );
+        assert_eq!(encode_path_segment("../internal"), "%2E%2E%2Finternal");
+        assert_eq!(encode_path_segment("a?b#c"), "a%3Fb%23c");
     }
 }

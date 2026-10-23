@@ -10,6 +10,7 @@ const BUCKET_LABEL: Record<string, string> = {
   COMPILE_ERROR: "Your code could not be parsed",
   RUNTIME_ERROR: "Your code crashed while running",
   INFRA_ERROR: "The sandbox failed — this attempt does not count",
+  NO_TESTS: "It ran, but there are no tests — nothing was verified",
 };
 
 function TestRow({ test }: { test: TestResult }) {
@@ -66,7 +67,9 @@ function TestRow({ test }: { test: TestResult }) {
                 <div>
                   <span className="text-[var(--muted)]">expected</span>
                   <pre className="mt-0.5 text-[var(--pass)]">
-                    {test.expected}
+                    {test.expected ?? (
+                      <span className="text-[var(--muted)]">(no expected output)</span>
+                    )}
                   </pre>
                 </div>
                 <div>
@@ -104,6 +107,7 @@ export function TestDrawer({ execution }: { execution: LastExecution | null }) {
   if (!execution) return null;
 
   const accepted = execution.bucket === "ACCEPTED";
+  const unverified = execution.bucket === "NO_TESTS";
 
   return (
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)]">
@@ -117,7 +121,7 @@ export function TestDrawer({ execution }: { execution: LastExecution | null }) {
           ▸
         </span>
         <span
-          className={`font-mono text-xs ${accepted ? "text-[var(--pass)]" : "text-[var(--fail)]"}`}
+          className={`font-mono text-xs ${accepted ? "text-[var(--pass)]" : unverified ? "text-[var(--warn)]" : "text-[var(--fail)]"}`}
         >
           {execution.bucket}
         </span>
@@ -128,7 +132,9 @@ export function TestDrawer({ execution }: { execution: LastExecution | null }) {
           <span className={accepted ? "text-[var(--pass)]" : ""}>
             {execution.passed}
           </span>
-          <span className="text-[var(--muted)]">/{execution.total} passed</span>
+          <span className="text-[var(--muted)]">
+            {unverified ? " tests" : `/${execution.total} passed`}
+          </span>
         </span>
       </button>
 

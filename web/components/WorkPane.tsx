@@ -46,12 +46,14 @@ export function BusyBar({
 export function WorkPane({
   view,
   starterCode,
+  testCount,
   busy,
   onSubmitLogic,
   onSubmitCode,
 }: {
   view: SessionView | null;
   starterCode: string;
+  testCount?: number;
   busy: boolean;
   onSubmitLogic: (text: string) => void;
   onSubmitCode: (text: string) => void;
@@ -136,9 +138,13 @@ export function WorkPane({
           <span className="text-xs text-[var(--pass)]">
             Solved — reset to try again.
           </span>
+        ) : testCount === 0 ? (
+          <span className="text-xs text-[var(--warn)]">
+            No tests: runs once on empty input — the result is not verified.
+          </span>
         ) : (
           <span className="text-xs text-[var(--muted)]">
-            Runs against all {view?.last_execution?.total ?? 5} tests.
+            Runs against all {testCount ?? view?.last_execution?.total ?? 5} tests.
           </span>
         )}
       </div>

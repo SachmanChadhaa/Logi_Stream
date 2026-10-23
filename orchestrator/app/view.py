@@ -35,6 +35,14 @@ def _eval_for_view(last_eval: dict[str, Any] | None) -> dict[str, Any] | None:
     return {k: last_eval.get(k) for k in _EVAL_FIELDS}
 
 
+def _diagnosis_for_view(diagnosis: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Ranked causes with their evidence. The feature vector stays server-side:
+    it is training data for the future ranker, not something a student needs."""
+    if not diagnosis:
+        return None
+    return {k: diagnosis.get(k) for k in ("ranker", "score_kind", "bucket", "candidates")}
+
+
 def build_session_view(
     values: dict[str, Any],
     *,
@@ -46,6 +54,9 @@ def build_session_view(
     return {
         "thread_id": thread_id,
         "problem_id": values.get("problem_id"),
+        # additive fields (docs/BYOP.md); curated clients can ignore them
+        "problem_kind": values.get("problem_kind") or "curated",
+        "diagnosis": _diagnosis_for_view(values.get("last_diagnosis")),
         "phase": values.get("phase", "LOGIC"),
         "status": values.get("status", "LOGIC_WRITE"),
         "attempts": values.get("attempts") or {"logic": 0, "code": 0},
@@ -59,5 +70,6 @@ def build_session_view(
             "regenerations": values.get("regenerations", 0),
             "verifier_rejections": values.get("verifier_rejections") or [],
             "fallback_used": bool(values.get("fallback_used")),
+            "run_history": values.get("run_history") or [],
         },
     }

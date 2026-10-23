@@ -84,8 +84,13 @@ if curl -sf --max-time 2 http://localhost:8080/health >/dev/null 2>&1; then
   ok "already running"
 else
   JAR=$(ls -1 "$ROOT"/domain/target/domain-*.jar 2>/dev/null | grep -v original | head -1)
+  # rebuild when any source is newer than the jar, so a stale build never runs
+  if [ -n "$JAR" ] && [ -n "$(find "$ROOT/domain/src" "$ROOT/domain/pom.xml" -newer "$JAR" -type f 2>/dev/null | head -1)" ]; then
+    echo "    sources changed since the last build; rebuilding..."
+    JAR=""
+  fi
   if [ -z "$JAR" ]; then
-    echo "    building (first run only)..."
+    echo "    building..."
     (cd "$ROOT/domain" && mvn -q -B -DskipTests package) || die "maven build failed"
     JAR=$(ls -1 "$ROOT"/domain/target/domain-*.jar | grep -v original | head -1)
   fi
@@ -100,7 +105,7 @@ if curl -sf --max-time 2 http://localhost:8001/health >/dev/null 2>&1; then
   ok "already running"
 else
   ( cd "$ROOT/orchestrator" && nohup uv run uvicorn app.main:app \
-      --host 0.0.0.0 --port 8001 > "$LOGS/orchestrator.log" 2>&1 < /dev/null & )
+      --host "${ORCHESTRATOR_BIND:-0.0.0.0}" --port 8001 > "$LOGS/orchestrator.log" 2>&1 < /dev/null & )
   wait_http http://localhost:8001/health 90 "healthy" || {
     tail -25 "$LOGS/orchestrator.log"; die "orchestrator never became healthy"; }
 fi
@@ -112,8 +117,8 @@ if curl -sf --max-time 2 http://localhost:8000/health >/dev/null 2>&1; then
 else
   BIN="$ROOT/gateway/target/release/logistream-gateway.exe"
   [ -x "$BIN" ] || BIN="$ROOT/gateway/target/release/logistream-gateway"
-  if [ ! -x "$BIN" ]; then
-    echo "    building (first run only)..."
+  if [ ! -x "$BIN" ] || [ -n "$(find "$ROOT/gateway/src" "$ROOT/gateway/Cargo.toml" -newer "$BIN" -type f 2>/dev/null | head -1)" ]; then
+    echo "    building..."
     (cd "$ROOT/gateway" && cargo build --release) || die "cargo build failed"
   fi
   ( cd "$ROOT/gateway" && nohup "$BIN" > "$LOGS/gateway.log" 2>&1 < /dev/null & )
