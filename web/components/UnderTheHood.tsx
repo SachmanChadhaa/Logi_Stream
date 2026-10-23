@@ -211,13 +211,18 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
                   </h3>
                   <p className="mb-1 text-[10px] text-[var(--muted)]">
                     Advisory ranking; scores are {dx.score_kind}.
+                    {dx.model_version ? ` Booster ${dx.model_version}: synthetic-trained, unvalidated.` : ""}
+                    {dx.iterations ? ` ${dx.iterations} diagnostic pass(es).` : ""}
                   </p>
                   {dx.candidates.length ? (
                     <ol className="list-decimal space-y-1 pl-4">
                       {dx.candidates.map((c) => (
                         <li key={c.id}>
                           <span className="font-mono">{c.id}</span>{" "}
-                          <span className="font-mono text-[var(--muted)]">({c.score})</span>
+                          <span className="font-mono text-[var(--muted)]">
+                            (rule {c.score}
+                            {c.model_score !== undefined ? ` · booster ${c.model_score}` : ""})
+                          </span>
                           <div>{c.cause}</div>
                           {c.evidence.map((e, i) => (
                             <div key={i} className="font-mono text-[10px] text-[var(--muted)]">

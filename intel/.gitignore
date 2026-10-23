@@ -1,0 +1,6 @@
+target/
+# trained artefacts are regenerated deterministically by `intel-train`
+models/*.mpk
+models/*.json
+models/*.csv
+!models/.gitkeep

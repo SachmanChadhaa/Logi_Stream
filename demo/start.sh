@@ -99,6 +99,40 @@ else
     tail -25 "$LOGS/domain.log"; die "java never became healthy"; }
 fi
 
+# ------------------------------------------------- 3b. intel (rust sidecar)
+# Optional: the orchestrator falls back to its rules ranker without it. Trained
+# models are regenerated deterministically on first run (~90 s).
+step "intel sidecar (rust, :${INTEL_PORT:-8003})"
+if curl -sf --max-time 2 "http://127.0.0.1:${INTEL_PORT:-8003}/health" >/dev/null 2>&1; then
+  ok "already running"
+else
+  IBIN="$ROOT/intel/target/release/intel-serve.exe"
+  [ -x "$IBIN" ] || IBIN="$ROOT/intel/target/release/intel-serve"
+  if [ ! -x "$IBIN" ] || [ -n "$(find "$ROOT/intel/src" "$ROOT/intel/Cargo.toml" -newer "$IBIN" -type f 2>/dev/null | head -1)" ]; then
+    echo "    building..."
+    (cd "$ROOT/intel" && cargo build --release >/dev/null 2>&1) || echo "    intel build failed - continuing with the rules ranker"
+  fi
+  if [ -x "$IBIN" ] && [ ! -f "$ROOT/intel/models/booster-v0.json" ]; then
+    echo "    training synthetic v0 models (first run only)..."
+    (cd "$ROOT/intel" && ./target/release/intel-train --out models > "$LOGS/intel-train.log" 2>&1)       || echo "    training failed - see demo/logs/intel-train.log"
+  fi
+  if [ -x "$IBIN" ]; then
+    ( cd "$ROOT/intel" && nohup "$IBIN" > "$LOGS/intel.log" 2>&1 < /dev/null & )
+    wait_http "http://127.0.0.1:${INTEL_PORT:-8003}/health" 20 "healthy"       || echo "    intel did not come up - the tutor uses the rules ranker (see demo/logs/intel.log)"
+  fi
+fi
+
+# ------------------------------------------------- 3c. ollama (local models)
+step "ollama (local LLM + vision model, :11434)"
+if curl -sf --max-time 2 http://127.0.0.1:11434/api/version >/dev/null 2>&1; then
+  ok "already running"
+elif command -v ollama >/dev/null 2>&1; then
+  ( nohup ollama serve > "$LOGS/ollama.log" 2>&1 < /dev/null & )
+  wait_http http://127.0.0.1:11434/api/version 30 "healthy"     || echo "    ollama did not start - tutor turns and the screen observer will be unavailable"
+else
+  echo "    ollama is not installed - tutor turns and the screen observer will be unavailable"
+fi
+
 # ---------------------------------------------------------------- 4. python
 step "orchestrator (python, :8001)"
 if curl -sf --max-time 2 http://localhost:8001/health >/dev/null 2>&1; then

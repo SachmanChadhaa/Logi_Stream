@@ -53,6 +53,13 @@ else
 fi
 check_http "domain (java) :8080" http://localhost:8080/health
 check_http "orchestrator  :8001" http://localhost:8001/health
+check_http "intel (rust)  :8003" http://127.0.0.1:${INTEL_PORT:-8003}/health
+check_http "ollama        :11434" http://127.0.0.1:11434/api/version
+if curl -s --max-time 5 http://localhost:8000/api/observer/status ${DEMO_PASSCODE:+-H "X-Demo-Passcode: $DEMO_PASSCODE"}      | grep -q '"available":true'; then
+  ok "screen observer: local vision model ready"
+else
+  no "screen observer unavailable (ollama down or model not pulled) - tutoring still works"
+fi
 check_http "gateway       :8000" http://localhost:8000/health
 check_http "web (next)    :3000" http://localhost:3000
 

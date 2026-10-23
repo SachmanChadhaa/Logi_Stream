@@ -34,6 +34,10 @@ MAX_ITERATIONS = 2
 MAX_RUN_HISTORY = 20
 RULES = diagnostics.RANKER_VERSION
 BOOSTED = "rust-gru-booster-v0 synthetic"
+# The booster scored every candidate but was NOT allowed to reorder them: on
+# held-out synthetic scenarios it ranked worse than the rules (intel decides
+# this from its own metrics file and says so in every /v1/rank reply).
+SHADOW = "rules-v1 (+ rust booster shadow)"
 
 
 def _gru_step(t: dict[str, Any], vector: list[float]) -> dict[str, Any] | None:
@@ -51,15 +55,17 @@ def _gru_step(t: dict[str, Any], vector: list[float]) -> dict[str, Any] | None:
 
 
 def _rerank(diagnosis: dict[str, Any], vector: list[float], gru: dict[str, Any] | None) -> str:
-    """Reorder the evidence-backed rules candidates by booster score.
+    """Score the evidence-backed rules candidates with the booster.
 
     The booster never ADDS a cause the rules did not find: a candidate without
-    evidence is a guess, and the tutor is told to label guesses. Returns the
-    ranker label that actually produced the order.
+    evidence is a guess, and the tutor is told to label guesses. It REORDERS
+    them only when the sidecar says it was promoted (it beat the rules on
+    held-out scenarios); otherwise the scores ride along in shadow mode and the
+    rules order stands. Returns the ranker label that produced the order.
     """
     cands = diagnosis.get("candidates") or []
-    if len(cands) < 2:
-        return RULES if not cands or gru is None else BOOSTED
+    if not cands:
+        return RULES
     out = intel_client.rank(vector, gru, [c["id"] for c in cands], trace_id=tracing.get_trace_id())
     if out is None:
         return RULES
@@ -67,8 +73,10 @@ def _rerank(diagnosis: dict[str, Any], vector: list[float], gru: dict[str, Any] 
     for c in cands:
         if c["id"] in scores:
             c["model_score"] = round(scores[c["id"]], 3)
-    cands.sort(key=lambda c: -scores.get(c["id"], float("-inf")))
     diagnosis["model_version"] = out.get("model_version")
+    if not out.get("promoted"):
+        return SHADOW
+    cands.sort(key=lambda c: -scores.get(c["id"], float("-inf")))
     return BOOSTED
 
 

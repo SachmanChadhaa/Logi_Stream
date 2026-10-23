@@ -202,3 +202,45 @@ def test_ollama_down_is_reported_not_raised(monkeypatch):
     assert s["available"] is False and "not running" in s["detail"]
     with pytest.raises(observer.ObserverUnavailable):
         observer.interpret(PNG_1PX)
+
+
+# ------------------------------------------------------------ booster modes
+
+def _diag():
+    return {"candidates": [
+        {"id": "prints-nothing", "cause": "a", "next_action": "x", "score": 0.85, "evidence": ["e1"]},
+        {"id": "logic-wrong-on-case", "cause": "b", "next_action": "y", "score": 0.6, "evidence": ["e2"]},
+    ]}
+
+
+def test_shadow_booster_never_reorders(monkeypatch):
+    from app.nodes import diagnose as d
+    monkeypatch.setattr(intel_client, "rank", lambda *a, **k: {
+        "ranked": [{"id": "logic-wrong-on-case", "score": 2.0}, {"id": "prints-nothing", "score": -1.0}],
+        "model_version": "booster-v0-synthetic", "promoted": False})
+    diag = _diag()
+    assert d._rerank(diag, [0.0] * features_v1.DIM, None) == d.SHADOW
+    assert [c["id"] for c in diag["candidates"]] == ["prints-nothing", "logic-wrong-on-case"]
+    assert diag["candidates"][1]["model_score"] == 2.0, "scores ride along for display"
+
+
+def test_promoted_booster_reorders_but_never_adds(monkeypatch):
+    from app.nodes import diagnose as d
+    monkeypatch.setattr(intel_client, "rank", lambda *a, **k: {
+        "ranked": [{"id": "syntax", "score": 9.0}, {"id": "logic-wrong-on-case", "score": 2.0},
+                   {"id": "prints-nothing", "score": -1.0}],
+        "model_version": "booster-v0-synthetic", "promoted": True})
+    diag = _diag()
+    assert d._rerank(diag, [0.0] * features_v1.DIM, None) == d.BOOSTED
+    assert [c["id"] for c in diag["candidates"]] == ["logic-wrong-on-case", "prints-nothing"]
+
+
+def test_gru_step_stores_hidden_state_and_student_state(monkeypatch):
+    from app.nodes import diagnose as d
+    monkeypatch.setattr(intel_client, "track", lambda v, h, **k: {
+        "hidden": [0.1] * 32, "state_label": "stuck", "state_scores": {"stuck": 0.7},
+        "cause_scores": {}, "model_version": "gru-v0-synthetic"})
+    t = temporal.empty()
+    d._gru_step(t, [0.0] * features_v1.DIM)
+    assert t["gru"] == {"hidden": [0.1] * 32, "model_version": "gru-v0-synthetic"}
+    assert t["student_state"]["label"] == "stuck"

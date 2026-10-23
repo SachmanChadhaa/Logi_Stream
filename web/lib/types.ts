@@ -90,6 +90,8 @@ export interface DiagnosisCandidate {
   next_action: string;
   score: number;
   evidence: string[];
+  /** Rust booster margin (shadow or promoted); ordering only, not a probability */
+  model_score?: number;
 }
 
 export interface Diagnosis {
@@ -97,6 +99,8 @@ export interface Diagnosis {
   score_kind: string;
   bucket: Bucket;
   candidates: DiagnosisCandidate[];
+  model_version?: string | null;
+  iterations?: number | null;
 }
 
 export interface SessionView {
