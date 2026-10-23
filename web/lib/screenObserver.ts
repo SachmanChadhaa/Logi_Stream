@@ -7,7 +7,7 @@
 //     picker -- the student chooses the window (their IDE or terminal)
 //   * state is the real capture state: if the student stops sharing from the
 //     browser's own bar, the track ends and this goes back to "off"
-//   * frames are downscaled here (max 1024 px wide, JPEG) and sampled about
+//   * frames are downscaled here (max 1600 px wide, JPEG) and sampled about
 //     every 15 s plus on Run/error; near-identical frames are skipped
 //   * one frame in flight at a time; nothing is stored in the browser
 //   * frames go to the gateway -> orchestrator -> LOCAL Ollama, and only a short
@@ -21,8 +21,9 @@ import type { SessionView } from "./types";
 export type CaptureState = "off" | "starting" | "on" | "paused";
 
 const SAMPLE_MS = 15_000;
-const MAX_WIDTH = 1024;
-const JPEG_QUALITY = 0.6;
+// 1600 px: at 1024 the vision model misreads small editor text (arr[0] -> 0)
+const MAX_WIDTH = 1600;
+const JPEG_QUALITY = 0.7;
 // mean absolute difference on a 32x18 grey thumbnail, 0..255
 const SAME_FRAME_THRESHOLD = 2.5;
 

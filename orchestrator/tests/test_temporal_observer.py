@@ -307,3 +307,68 @@ def test_screen_problem_is_offered_kept_and_cleared(g):
     assert t["screen_problem"] is None
     v = g.get_state(_cfg("t9")).values
     assert not any(m["role"] == "tutor" for m in v["messages"]), "seeing a problem never starts a turn"
+
+
+# ------------------------------------------------------------ code on screen (outside the app)
+
+GFG_CODE = "int largest(int arr[], int n) {\n    int max = arr[0];\n    int max = arr[0];\n    return max;\n}"
+
+
+def test_parse_reply_keeps_code_on_screen():
+    r = observer.parse_reply(json.dumps({"activity": "browser", "error_visible": False, "error_text": "",
+                                         "problem_title": "", "problem_statement": "",
+                                         "code": GFG_CODE, "code_language": "C", "summary": "writing C"}))
+    assert r["code"] == {"text": GFG_CODE, "language": "C"}
+    r = observer.parse_reply('{"activity":"editing","error_visible":false,"error_text":"","code":"  ","summary":"x"}')
+    assert r["code"] is None
+
+
+def test_screen_code_reaches_memory_strategy_and_prompt(g):
+    from app.prompts.custom_tutor import build_custom_tutor_user
+    g.invoke(initial_state("custom-x", "u", "t10", kind="custom"), _cfg("t10"))
+    g.invoke(Command(resume={"type": "observe", "text": "x", "observation": {
+        "text": "x", "tags": {}, "code_revision": 0, "problem": None,
+        "code": {"text": GFG_CODE, "language": "C"}}}), _cfg("t10"))
+    t = g.get_state(_cfg("t10")).values["temporal"]
+    assert t["screen_code"]["text"] == GFG_CODE
+    assert t["strategy"] == "review-screen-code"
+    assert temporal.for_view(t)["screen_code"]["language"] == "C"
+
+    user = build_custom_tutor_user(
+        title="Largest", statement="s", constraints="", examples=[], language="python",
+        bucket="NOT_RUN", results_summary="", student_code="", diagnosis=None, history_summary="",
+        hint_level=1, recent_messages=[{"role": "student", "kind": "chat", "text": "is my code correct?"}],
+        screen_code=t["screen_code"])
+    assert "  3|     int max = arr[0];" in user, "numbered, so the tutor can quote the line"
+    assert user.rstrip().splitlines()[-3] == "is my code correct?"
+
+
+def test_verify_code_rejects_a_word_for_word_repeat(monkeypatch):
+    from app import domain_client
+    from app.nodes.code_tutor import verify_code
+    monkeypatch.setattr(domain_client, "get_problem_context", lambda *a, **k: CTX)
+    said = "Hypothesis: look at line 3. What does it declare?"
+    out = verify_code({"problem_id": "custom-x", "draft": said + " ", "user_code": "",
+                       "messages": [{"role": "tutor", "kind": "hint", "text": said}], "node_path": []})
+    assert out["regenerations"] == 1
+    assert out["verifier_rejections"][-1]["reason"] == "repeats the previous reply word for word"
+    out = verify_code({"problem_id": "custom-x", "draft": "Hypothesis: line 2 and 3 both declare max.",
+                       "user_code": "", "messages": [{"role": "tutor", "kind": "hint", "text": said}],
+                       "node_path": []})
+    assert out["messages"][0]["role"] == "tutor"
+
+
+
+def test_parse_transcript_keeps_duplicates_and_drops_numbers():
+    t = observer.parse_transcript("1| int f() {\n2|     int m = a[0];\n3|     int m = a[0];\n4|\n5| }")
+    assert t == "int f() {\n    int m = a[0];\n    int m = a[0];\n\n}"
+    assert observer.parse_transcript("NONE") == ""
+
+
+def test_nothing_run_means_nothing_verified(monkeypatch):
+    from app import domain_client
+    from app.nodes.code_tutor import verify_code
+    monkeypatch.setattr(domain_client, "get_problem_context", lambda *a, **k: CTX)
+    out = verify_code({"problem_id": "custom-x", "draft": "Verified: line 3 declares max again. Why?",
+                       "user_code": "", "messages": [], "node_path": [], "last_execution": None})
+    assert out["messages"][0]["text"] == "Hypothesis (not run): line 3 declares max again. Why?"

@@ -53,6 +53,8 @@ def empty() -> dict[str, Any]:
         "last_event_ts": None,
         # a DIFFERENT problem the observer saw on screen: {title, statement, ts}
         "screen_problem": None,
+        # code the observer read off the screen (not this app's editor): {text, language, ts}
+        "screen_code": None,
     }
 
 
@@ -146,10 +148,10 @@ def summarize(temporal: dict[str, Any], run_history: list[dict[str, Any]] | None
     return " ".join(parts)
 
 
-def strategy(bucket: str | None, hint_level: int, has_run: bool) -> str:
+def strategy(bucket: str | None, hint_level: int, has_run: bool, screen_code: bool = False) -> str:
     """Which tutoring move fits: a label the prompt and the UI both show."""
     if not has_run:
-        return "clarify-plan"
+        return "review-screen-code" if screen_code else "clarify-plan"
     if bucket == "NO_TESTS":
         return "suggest-tests"
     if bucket == "ACCEPTED":
@@ -172,6 +174,7 @@ def for_view(temporal: dict[str, Any] | None) -> dict[str, Any] | None:
         "ranker": t["ranker"],
         "student_state": t["student_state"],
         "screen_problem": t["screen_problem"],
+        "screen_code": t["screen_code"],
     }
 
 

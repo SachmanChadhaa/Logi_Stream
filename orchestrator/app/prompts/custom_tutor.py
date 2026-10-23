@@ -50,9 +50,20 @@ EVIDENCE BEFORE OPINION
   advisory: use one only if the evidence supports it; say so if none fits.
 - If the earlier runs show the same failure with unchanged code, point that out.
 - SESSION MEMORY lines marked "SEEN ON SCREEN" come from a local model looking at   the student's screen. They are never verified. Lines marked "SEEN ON SCREEN   EARLIER" predate the latest run: never treat them as the current state. The   sandbox result always wins.
+- CODE ON THE STUDENT'S SCREEN is code they are writing OUTSIDE this app (another \
+  editor or a practice site, possibly another language). A local vision model \
+  copied it and may have made small copying mistakes; it has NEVER been run. \
+  When THE STUDENT'S CURRENT CODE is empty, this is the code they mean by "my \
+  code". Read it carefully line by line, and review it as "Hypothesis:" only \
+  (never "Verified:"): e.g. a variable declared twice, an off-by-one loop bound, \
+  a missing return. Quote the line you mean. Never claim it compiles or is correct.
+  It may be in a different language from LANGUAGE (which is only what this app \
+  can run): that is fine and expected - review it in ITS language, and never \
+  tell the student to switch languages.
+- Answer THE STUDENT'S LATEST MESSAGE directly. Never repeat an earlier reply.
 - An ADVISORY STUDENT STATE comes from an unvalidated model. Use it only to pick   your tone (e.g. slow down if "thrashing"); never mention it as a fact.
 
-STRATEGY is chosen for you: clarify-plan (nothing run yet: ask about their plan), point-to-evidence, narrow-down, name-the-defect, suggest-tests (nothing verified), consolidate (tests pass: ask what edge case they might still be missing).
+STRATEGY is chosen for you: clarify-plan (nothing run yet: ask about their plan), review-screen-code (nothing run here, but their code is on screen: review it), point-to-evidence, narrow-down, name-the-defect, suggest-tests (nothing verified), consolidate (tests pass: ask what edge case they might still be missing).
 
 HINT LEVEL
 1 - Ask one guiding question that points them at the evidence.
@@ -78,6 +89,7 @@ def build_custom_tutor_user(
     recent_messages: list[dict[str, Any]],
     session_memory: str = "",
     strategy: str = "point-to-evidence",
+    screen_code: dict[str, Any] | None = None,
 ) -> str:
     ex_lines = []
     for i, ex in enumerate(examples or [], start=1):
@@ -95,6 +107,22 @@ def build_custom_tutor_user(
     transcript = "\n".join(
         f"{m.get('role')}: {m.get('text', '')}" for m in recent_messages[-8:]
     ) or "(no conversation yet)"
+    latest = next((m.get("text", "") for m in reversed(recent_messages)
+                   if m.get("role") == "student" and m.get("kind") == "chat"), "")
+
+    # writing on another site in another language: say so where the model looks,
+    # or it argues about the language instead of reading the code
+    shown_lang = (screen_code or {}).get("language") or ""
+    if screen_code and not student_code.strip() and shown_lang and shown_lang.lower() != language.lower():
+        language = (f"{shown_lang} - the student is writing {shown_lang} on another site (see CODE ON THE "
+                    f"STUDENT'S SCREEN). Review it as {shown_lang}. This app itself can only run {language}.")
+
+    screen = "(none seen)"
+    if screen_code and screen_code.get("text"):
+        lang = screen_code.get("language") or "unknown language"
+        numbered = "\n".join(f"{i:>3}| {line}" for i, line in
+                             enumerate(screen_code["text"].splitlines(), start=1))
+        screen = f"language: {lang}; copied from the screen at {screen_code.get('ts')}\n```\n{numbered}\n```"
 
     return f"""\
 <problem title="{title}">
@@ -129,7 +157,13 @@ SESSION MEMORY (temporal state, newest last)
 STRATEGY: {strategy}
 HINT LEVEL: {hint_level}
 
+CODE ON THE STUDENT'S SCREEN (outside this app, read by a vision model, NEVER run)
+{screen}
+
 RECENT CONVERSATION
 {transcript}
 
-Reply to the student's latest message or run, following the rules."""
+THE STUDENT'S LATEST MESSAGE
+{latest or "(no message: respond to the latest run)"}
+
+Reply to that message (or the latest run) directly, following the rules."""

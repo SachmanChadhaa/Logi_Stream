@@ -69,6 +69,7 @@ def code_tutor(state: SessionState) -> dict[str, Any]:
             hint_level=hint_level(history) if execution else 1,
             recent_messages=state.get("messages") or [],
             session_memory=temporal.for_prompt(state.get("temporal")),
+            screen_code=(state.get("temporal") or {}).get("screen_code"),
             strategy=(state.get("temporal") or {}).get("strategy") or
                      ("point-to-evidence" if execution else "clarify-plan"),
         )
@@ -116,11 +117,21 @@ def verify_code(state: SessionState) -> dict[str, Any]:
     ctx = domain_client.get_problem_context(state["problem_id"])
     rubric = ctx.get("rubric") or {}
     draft = state.get("draft") or ""
+    if not state.get("last_execution") and "Verified:" in draft:
+        # nothing has run in this session (e.g. the code is only on their
+        # screen), so nothing can be verified: downgrade the claim, never pass it
+        log.warning("verify_code downgraded 'Verified:' -- nothing has been executed")
+        draft = draft.replace("Verified:", "Hypothesis (not run):")
 
     # the student's own function names count as entrypoints too, so a custom
     # problem without a rubric is still protected against a rewritten function
     result = verifier.verify_code_draft(
         draft, rubric, verifier.defined_functions(state.get("user_code", "")))
+    # a tutor that answers a new question with its last reply, word for word,
+    # is not listening: send it back to write a real answer
+    previous = [m["text"] for m in (state.get("messages") or []) if m.get("role") == "tutor"]
+    if result.ok and previous and " ".join(draft.split()) == " ".join(previous[-1].split()):
+        result = verifier.VerificationResult(False, [{"reason": "repeats the previous reply word for word"}])
     node_path = list(state.get("node_path") or []) + ["verify_code"]
     rejections = list(state.get("verifier_rejections") or [])
 

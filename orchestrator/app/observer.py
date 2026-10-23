@@ -18,6 +18,7 @@ import binascii
 import json
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any
@@ -34,6 +35,7 @@ MAX_IMAGE_BYTES = 2_500_000
 MAX_TEXT = 300
 MAX_PROBLEM_TITLE = 120
 MAX_PROBLEM_STATEMENT = 1500
+MAX_SCREEN_CODE = 2000
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 _in_flight = threading.Lock()
@@ -70,7 +72,31 @@ Return JSON only:
  "error_text": "the visible error message, verbatim, max 120 chars, or empty",
  "problem_title": "the title of the coding problem shown on screen, verbatim, or empty if none is visible",
  "problem_statement": "that problem's visible statement, examples and constraints, copied verbatim, max 600 characters, or empty",
+ "code": "the code visible in the code editor, copied EXACTLY line by line with its indentation (keep mistakes and duplicate lines as they are), max 1500 characters, or empty",
+ "code_language": "the programming language of that code (e.g. C, C++, Java, Python), or empty",
  "summary": "what the student appears to be doing, max 30 words"}"""
+
+
+# Asked for code inside the JSON above, a 3B model quietly tidies it (it dropped
+# a duplicated declaration -- exactly the bug a tutor should see). Asked on its
+# own to pair every line with the editor's line number, it copies faithfully.
+TRANSCRIBE_PROMPT = """\
+Transcribe the source code shown in the code editor in this screenshot.
+Copy it character for character, exactly as typed, INCLUDING mistakes, typos \
+and repeated lines - do not fix, reorder or tidy anything.
+Write one output line per editor line, starting with the editor's line number \
+and a | character, like:
+1| first line
+2| second line
+Output only those lines. If no code editor is visible, output NONE."""
+
+_NUMBERED = re.compile(r"^\s*\d+\s*\|\s?(.*)$")
+
+
+def parse_transcript(content: str) -> str:
+    """'1| code' lines -> the code; '' when the model saw no editor."""
+    lines = [m.group(1).rstrip() for m in map(_NUMBERED.match, (content or "").splitlines()) if m]
+    return "\n".join(lines).strip("\n")[:MAX_SCREEN_CODE]
 
 
 def decode_frame(image_b64: str) -> bytes:
@@ -108,12 +134,18 @@ def parse_reply(content: str) -> dict[str, Any]:
     title = " ".join(str(d.get("problem_title") or "").split())[:MAX_PROBLEM_TITLE]
     statement = str(d.get("problem_statement") or "").strip()[:MAX_PROBLEM_STATEMENT]
     problem = {"title": title, "statement": statement} if title else None
+    # code typed OUTSIDE this app (another editor or a practice site). Never
+    # executed; the tutor may only reason about it as a hypothesis.
+    code_text = str(d.get("code") or "").rstrip()[:MAX_SCREEN_CODE]
+    code = ({"text": code_text, "language": " ".join(str(d.get("code_language") or "").split())[:20]}
+            if code_text.strip() else None)
     text = summary + (f" Error visible on screen: {error_text}" if error_visible else "")
     if problem:
         text = f"{text} Problem on screen: {title}."
     return {
         "text": text.strip()[:MAX_TEXT] or "(nothing recognisable on screen)",
         "problem": problem,
+        "code": code,
         "tags": {
             "error_visible": error_visible,
             "editing": activity == "editing",
@@ -129,23 +161,26 @@ def interpret(image_b64: str) -> dict[str, Any]:
     if not _in_flight.acquire(blocking=False):
         raise ObserverUnavailable("busy: one observation is already being interpreted")
     t0 = time.monotonic()
+    image = base64.b64encode(raw).decode("ascii")
+    del raw
     try:
-        r = httpx.post(f"{OLLAMA_URL}/api/chat", timeout=OLLAMA_TIMEOUT_S, json={
-            "model": OLLAMA_VLM_MODEL,
-            "stream": False,
-            "format": "json",
-            "keep_alive": "15m",
-            "options": {"temperature": 0, "num_predict": 450},
-            "messages": [{"role": "user", "content": PROMPT,
-                          "images": [base64.b64encode(raw).decode("ascii")]}],
-        })
+        r = _ask(PROMPT, image, json_mode=True, num_predict=900)
+        transcript = None
+        if r.status_code == 200:
+            try:
+                looks_like_code = bool(parse_reply(r.json()["message"]["content"]).get("code"))
+            except (ObserverUnavailable, ValueError, KeyError, TypeError):
+                looks_like_code = False
+            if looks_like_code:
+                t = _ask(TRANSCRIBE_PROMPT, image, json_mode=False, num_predict=900)
+                transcript = parse_transcript(t.json()["message"]["content"]) if t.status_code == 200 else None
     except httpx.TimeoutException as e:
         raise ObserverUnavailable(f"VLM timed out after {OLLAMA_TIMEOUT_S:.0f}s") from e
     except httpx.HTTPError as e:
         raise ObserverUnavailable(f"Ollama is not reachable at {OLLAMA_URL}") from e
     finally:
         _in_flight.release()
-        del raw  # the frame is gone after this call either way
+        del image  # the frame is gone after this call either way
 
     if r.status_code == 404:
         raise ObserverUnavailable(f"model {OLLAMA_VLM_MODEL} is not pulled "
@@ -161,10 +196,25 @@ def interpret(image_b64: str) -> dict[str, Any]:
         raise ObserverUnavailable("unexpected Ollama response shape") from e
 
     out = parse_reply(content)
+    if out.get("code") and transcript:
+        out["code"]["text"] = transcript       # the faithful copy wins over the tidied one
     out["model"] = OLLAMA_VLM_MODEL
     out["latency_ms"] = int((time.monotonic() - t0) * 1000)
     log.info("observer: %d ms, tags=%s", out["latency_ms"], out["tags"])
     return out
+
+
+def _ask(prompt: str, image_b64: str, *, json_mode: bool, num_predict: int) -> httpx.Response:
+    body: dict[str, Any] = {
+        "model": OLLAMA_VLM_MODEL,
+        "stream": False,
+        "keep_alive": "15m",
+        "options": {"temperature": 0, "num_predict": num_predict},
+        "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
+    }
+    if json_mode:
+        body["format"] = "json"
+    return httpx.post(f"{OLLAMA_URL}/api/chat", timeout=OLLAMA_TIMEOUT_S, json=body)
 
 
 def status() -> dict[str, Any]:

@@ -212,6 +212,7 @@ def observe(thread_id: str, body: ObserveBody) -> dict[str, Any]:
             "text": obs["text"],
             "observation": {"text": obs["text"], "tags": obs["tags"], "code_revision": rev,
                             "problem": obs.get("problem"),
+                            "code": obs.get("code"),
                             "trigger": body.trigger, "model": obs["model"],
                             "latency_ms": obs["latency_ms"]},
         }), cfg)

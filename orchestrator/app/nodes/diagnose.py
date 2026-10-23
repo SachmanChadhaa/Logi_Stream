@@ -167,6 +167,10 @@ def diagnose(state: SessionState) -> dict[str, Any]:
         t = temporal.add_event(t, "observation", obs.get("text") or event.get("text", ""), "screen",
                                code_revision=obs.get("code_revision"))
         t["screen_problem"] = _screen_problem(state, obs.get("problem"), t.get("screen_problem"))
+        if (obs.get("code") or {}).get("text"):
+            # the newest code seen wins; a frame without code keeps the last one
+            t["screen_code"] = {"text": obs["code"]["text"], "language": obs["code"].get("language") or "",
+                                "ts": temporal.now_iso()}
         log.info("diagnose observation rev=%d tags=%s", t["code_revision"], obs.get("tags"))
 
     else:  # chat
@@ -178,7 +182,7 @@ def diagnose(state: SessionState) -> dict[str, Any]:
     t["summary"] = temporal.summarize(t, history)
     t["strategy"] = temporal.strategy(
         (state.get("last_execution") or {}).get("bucket") if history else None,
-        hint_level(history), bool(history))
+        hint_level(history), bool(history), bool(t.get("screen_code")))
     update["temporal"] = t
     return update
 

@@ -149,6 +149,8 @@ export interface TemporalView {
   student_state: StudentState | null;
   /** a different problem the observer read off the screen; offered, never auto-applied */
   screen_problem?: ScreenProblem | null;
+  /** code the observer copied off the screen (written outside this app); never run */
+  screen_code?: { text: string; language: string; ts: string } | null;
 }
 
 /** Text the local vision model read from the student's screen. Untrusted data. */

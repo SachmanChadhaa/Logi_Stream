@@ -277,6 +277,16 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
                     </Row>
                   )}
                   {tm.next_action && <Row label="next action">{tm.next_action}</Row>}
+                  {tm.screen_code && (
+                    <Row label="code on screen">
+                      <span className="text-[var(--muted)]">
+                        {tm.screen_code.language || "unknown language"} · copied by the local vision model, never run
+                      </span>
+                      <pre className="scroll-thin mt-1 max-h-40 overflow-auto rounded-[var(--radius)] border border-[var(--border)] bg-[var(--background)] p-2 font-mono text-[10.5px]">
+                        {tm.screen_code.text}
+                      </pre>
+                    </Row>
+                  )}
                   <ul className="mt-1 space-y-0.5 font-mono text-[10px]">
                     {tm.events.slice(-8).map((e, i) => (
                       <li key={i} className={e.stale ? "text-[var(--muted)] line-through decoration-[var(--border-strong)]" : ""}>
