@@ -26,6 +26,8 @@ function readProblemParam(): string | null {
 
 type BusyKind = "logic" | "chat" | "code" | "reset" | "load" | null;
 
+const CAPTURE_STILL_ON = "Screen capture is still on. Stop it from the header when you are done.";
+
 const BUSY_LABEL: Record<Exclude<BusyKind, null>, string> = {
   logic: "Evaluating your logic…",
   chat: "Tutor is thinking…",
@@ -200,9 +202,14 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
       w?.close();
       return null;
     });
-    if (observer.state !== "off") {
-      setNotice("Screen capture is still on. Stop it from the header when you are done.");
+    // only a live share deserves the warning; a picker that was still open
+    // ("starting") ends as cancelled or on, and "on" shows in the header
+    if (observer.state === "on" || observer.state === "paused") {
+      setNotice(CAPTURE_STILL_ON);
     }
+  }, [observer.state]);
+  useEffect(() => {
+    if (observer.state === "off") setNotice((n) => (n === CAPTURE_STILL_ON ? null : n));
   }, [observer.state]);
   const closeRef = useRef(closeAssistant);
   closeRef.current = closeAssistant;

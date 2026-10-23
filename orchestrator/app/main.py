@@ -283,4 +283,6 @@ async def unhandled(request: Request, exc: Exception) -> Response:
     """Never leak a stack trace to the caller, but always log one."""
     log.exception("unhandled error on %s %s", request.method, request.url.path)
     from fastapi.responses import JSONResponse
-    return JSONResponse(status_code=500, content={"detail": f"{type(exc).__name__}: {exc}"})
+    # the exception text can carry upstream bodies (provider errors, ids): log only
+    return JSONResponse(status_code=500, content={
+        "detail": f"internal error ({type(exc).__name__}); details are in the orchestrator log"})

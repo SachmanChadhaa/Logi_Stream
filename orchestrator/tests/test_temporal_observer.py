@@ -244,3 +244,25 @@ def test_gru_step_stores_hidden_state_and_student_state(monkeypatch):
     d._gru_step(t, [0.0] * features_v1.DIM)
     assert t["gru"] == {"hidden": [0.1] * 32, "model_version": "gru-v0-synthetic"}
     assert t["student_state"]["label"] == "stuck"
+
+
+# ------------------------------------------------------------ LLM down in the logic phase
+
+def test_logic_tutor_falls_back_to_the_rubric_question_when_the_llm_fails(monkeypatch):
+    from app import domain_client, llm
+    from app.nodes.logic_tutor import logic_tutor
+    rubric = {"misconceptions": [{"id": "nested-loop", "socratic_counter": "Kitne pairs?"}]}
+    monkeypatch.setattr(domain_client, "get_problem_context", lambda *a, **k: {
+        "title": "Two Sum", "description": "d", "rubric": rubric})
+
+    def no_llm(**k):
+        raise RuntimeError("llama-server process has terminated")
+    monkeypatch.setattr(llm, "complete", no_llm)
+
+    out = logic_tutor({"problem_id": "two-sum", "last_eval": {"misconception_id": "nested-loop"},
+                       "messages": [], "node_path": ["await_input"]})
+    assert out == {"draft": "Kitne pairs?", "node_path": ["await_input", "logic_tutor"],
+                   "fallback_used": True}
+
+    out = logic_tutor({"problem_id": "two-sum", "last_eval": None, "messages": [], "node_path": []})
+    assert out["draft"] and out["fallback_used"] is True
