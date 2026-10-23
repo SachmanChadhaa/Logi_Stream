@@ -19,11 +19,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Activity, ArrowUp, CornerDownRight, Loader2, Mic, MicOff, MonitorOff, Paperclip, Pause, Play,
-  Plus, Radio, ScreenShare, ShieldCheck, Sparkles, Square, Volume2, X,
+  Plus, Radio, ScanEye, ScreenShare, ShieldCheck, Sparkles, Square, Volume2, X,
 } from "lucide-react";
 
 import type { CaptureState } from "@/lib/screenObserver";
-import type { SessionView } from "@/lib/types";
+import type { ScreenProblem, SessionView } from "@/lib/types";
 
 export type OrbState = "idle" | "listening" | "thinking" | "speaking" | "muted";
 
@@ -154,6 +154,7 @@ export function Assistant({
   busy,
   onSend,
   observer,
+  onSwitchProblem,
 }: {
   open: boolean;
   /** set when the panel lives in a PiP window; null = in-page panel */
@@ -164,6 +165,8 @@ export function Assistant({
   busy: boolean;
   onSend: (text: string) => void;
   observer: ObserverControls;
+  /** start (or reopen) a session on a problem the observer read off the screen */
+  onSwitchProblem?: (problem: ScreenProblem) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const [attachOpen, setAttachOpen] = useState(false);
@@ -172,6 +175,8 @@ export function Assistant({
   const [listening, setListening] = useState(false);
   const [readAloud, setReadAloud] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
   const recRef = useRef<Recognition | null>(null);
   const lastSpoken = useRef<string>("");
 
@@ -258,13 +263,15 @@ export function Assistant({
 
   if (!open) return null;
 
+  const screenProblem = view?.temporal?.screen_problem ?? null;
+  const offer = screenProblem && screenProblem.title !== dismissed && onSwitchProblem ? screenProblem : null;
   const live = observer.state === "on";
   const paused = observer.state === "paused";
   const canSend = !!text.trim() && !busy && !done;
 
   const panel = (
     <div
-      className={`assistant flex w-full flex-col bg-[var(--surface)] text-[var(--foreground)] ${pipWindow ? "h-screen" : "h-[600px]"}`}
+      className={`assistant scroll-thin flex w-full flex-col overflow-y-auto bg-[var(--surface)] text-[var(--foreground)] ${pipWindow ? "h-screen" : "h-[min(660px,calc(100vh-6rem))]"}`}
       role="dialog"
       aria-label="LogiStream Socratic tutor"
     >
@@ -315,8 +322,45 @@ export function Assistant({
         </span>
       </p>
 
-      <div className="flex shrink-0 flex-col items-center gap-2 pt-4 pb-3">
-        <SiriOrb state={orb} size={92} />
+      {offer && (
+        <div className="mx-3 mt-2.5 shrink-0 rounded-[var(--radius-lg)] border border-[var(--accent)]/35 bg-[var(--accent-soft)] p-2.5">
+          <p className="flex items-center gap-1.5 text-[10.5px] font-medium tracking-wide text-[var(--accent)] uppercase">
+            <ScanEye size={12} aria-hidden /> On your screen
+          </p>
+          <p className="mt-1 truncate text-[13px] font-semibold text-[var(--foreground-strong)]" title={offer.title}>
+            {offer.title}
+          </p>
+          {offer.statement && (
+            <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-[var(--muted)]">{offer.statement}</p>
+          )}
+          <div className="mt-2 flex items-center gap-1.5">
+            <button
+              className="btn btn-primary !h-7"
+              disabled={switching || busy}
+              onClick={async () => {
+                setSwitching(true);
+                try {
+                  await onSwitchProblem!(offer);
+                } finally {
+                  setSwitching(false);
+                }
+              }}
+            >
+              {switching ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <Sparkles size={12} aria-hidden />}
+              Tutor me on this
+            </button>
+            <button className="btn btn-ghost !h-7" onClick={() => setDismissed(offer.title)}>
+              Not now
+            </button>
+          </div>
+          <p className="mt-1.5 text-[10px] leading-snug text-[var(--faint)]">
+            Read off your screen by the local model — check the statement after switching. Python only for now.
+          </p>
+        </div>
+      )}
+
+      <div className={`flex shrink-0 flex-col items-center gap-2 ${offer ? "pt-3 pb-2" : "pt-4 pb-3"}`}>
+        <SiriOrb state={orb} size={offer ? 56 : 92} />
         <span className="text-[11px] tracking-wide text-[var(--muted)]">{ORB_LABEL[orb]}</span>
       </div>
 

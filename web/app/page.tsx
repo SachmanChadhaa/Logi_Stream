@@ -14,8 +14,8 @@ import { TestDrawer } from "@/components/TestDrawer";
 import { UnderTheHood } from "@/components/UnderTheHood";
 import { BusyBar, WorkPane } from "@/components/WorkPane";
 import { ApiError, api } from "@/lib/api";
-import { useScreenObserver } from "@/lib/screenObserver";
-import type { Problem, SessionView } from "@/lib/types";
+import { type ObserverBinding, useScreenObserver } from "@/lib/screenObserver";
+import type { Problem, ScreenProblem, SessionView } from "@/lib/types";
 
 // The open problem lives in the URL (?problem=<id>), so a refresh resumes the
 // same session and a sample link like ?problem=two-sum works for the demo.
@@ -37,9 +37,31 @@ const BUSY_LABEL: Record<Exclude<BusyKind, null>, string> = {
   load: "Loading your session…",
 };
 
+/**
+ * Lives above the per-problem Session, so switching problems keeps the screen
+ * share running and the Picture-in-Picture window open: the capture is only
+ * re-pointed at the new session (ObserverBinding), never restarted.
+ */
+interface Shell {
+  observer: ReturnType<typeof useScreenObserver>;
+  binding: React.RefObject<ObserverBinding | null>;
+  assistantOpen: boolean;
+  setAssistantOpen: (open: boolean) => void;
+  pipWindow: Window | null;
+  setPipWindow: React.Dispatch<React.SetStateAction<Window | null>>;
+  closeRef: React.RefObject<() => void>;
+}
+
 export default function Page() {
   // undefined until the URL has been read on the client
   const [problemId, setProblemId] = useState<string | null | undefined>(undefined);
+
+  const binding = useRef<ObserverBinding | null>(null);
+  const observer = useScreenObserver(binding);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [pipWindow, setPipWindow] = useState<Window | null>(null);
+  const closeRef = useRef<() => void>(() => {});
+  const shell: Shell = { observer, binding, assistantOpen, setAssistantOpen, pipWindow, setPipWindow, closeRef };
 
   useEffect(() => {
     setProblemId(readProblemParam());
@@ -65,13 +87,37 @@ export default function Page() {
         </div>
       ) : (
         // keyed so switching problems starts from a clean slate
-        <Session key={problemId} problemId={problemId} onHome={() => open(null)} />
+        <Session
+          key={problemId}
+          problemId={problemId}
+          shell={shell}
+          onOpen={open}
+          onHome={() => {
+            // the landing page has no session to observe or assist
+            observer.stop();
+            pipWindow?.close();
+            setPipWindow(null);
+            setAssistantOpen(false);
+            open(null);
+          }}
+        />
       )}
     </PasscodeGate>
   );
 }
 
-function Session({ problemId, onHome }: { problemId: string; onHome: () => void }) {
+function Session({
+  problemId,
+  shell,
+  onOpen,
+  onHome,
+}: {
+  problemId: string;
+  shell: Shell;
+  onOpen: (id: string) => void;
+  onHome: () => void;
+}) {
+  const { observer, binding, assistantOpen, setAssistantOpen, pipWindow, setPipWindow, closeRef } = shell;
   const [problem, setProblem] = useState<Problem | null>(null);
   const [view, setView] = useState<SessionView | null>(null);
   const [busy, setBusy] = useState<BusyKind>(null);
@@ -80,8 +126,6 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
   const [notFound, setNotFound] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const [pipWindow, setPipWindow] = useState<Window | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [code, setCode] = useState("");
 
@@ -177,12 +221,39 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
   const isBusy = busy !== null;
   const done = view?.phase === "DONE";
 
-  const observer = useScreenObserver({
-    problemId,
-    codeRevision: view?.temporal?.code_revision ?? 0,
-    canSend: !isBusy && !!view && !done,
-    onView: setView,
+  // point the page-level screen capture at this session; unpoint on the way out
+  useEffect(() => {
+    binding.current = {
+      problemId,
+      codeRevision: view?.temporal?.code_revision ?? 0,
+      canSend: !isBusy && !!view && !done,
+      onView: setView,
+    };
   });
+  useEffect(() => () => {
+    binding.current = null;
+  }, [binding]);
+
+  // the observer read a different problem off the screen and the student said
+  // "tutor me on this": reuse their problem with that title, or create it
+  const switchToScreenProblem = useCallback(async (sp: ScreenProblem) => {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    try {
+      const existing = (await api.listProblems()).problems.find(
+        (p) => p.kind === "custom" && norm(p.title) === norm(sp.title),
+      );
+      const id = existing
+        ? existing.id
+        : (await api.createProblem({
+            title: sp.title.slice(0, 120),
+            statement: sp.statement.trim() || sp.title,
+            language: "python",
+          })).id;
+      onOpen(id);
+    } catch (e) {
+      fail(e);
+    }
+  }, [onOpen]);
 
   // after a run, look at the screen once more (the run may have changed what
   // the student sees) -- a tick later, once the busy flag has cleared
@@ -211,8 +282,7 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
   }, [observer.state]);
   useEffect(() => {
     if (observer.state === "off") setNotice((n) => (n === CAPTURE_STILL_ON ? null : n));
-  }, [observer.state]);
-  const closeRef = useRef(closeAssistant);
+  }, [observer.state, setAssistantOpen, setPipWindow]);
   closeRef.current = closeAssistant;
 
   if (notFound) {
@@ -323,6 +393,7 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
         busy={isBusy}
         onSend={(t) => send("chat", t)}
         observer={observer}
+        onSwitchProblem={switchToScreenProblem}
       />
     </div>
   );

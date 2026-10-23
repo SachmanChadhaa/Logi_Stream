@@ -147,6 +147,15 @@ export interface TemporalView {
   /** which ranker produced the diagnosis: rules-v1 or the Rust sidecar */
   ranker: string;
   student_state: StudentState | null;
+  /** a different problem the observer read off the screen; offered, never auto-applied */
+  screen_problem?: ScreenProblem | null;
+}
+
+/** Text the local vision model read from the student's screen. Untrusted data. */
+export interface ScreenProblem {
+  title: string;
+  statement: string;
+  ts: string;
 }
 
 export interface ObserverStatus {

@@ -266,3 +266,44 @@ def test_logic_tutor_falls_back_to_the_rubric_question_when_the_llm_fails(monkey
 
     out = logic_tutor({"problem_id": "two-sum", "last_eval": None, "messages": [], "node_path": []})
     assert out["draft"] and out["fallback_used"] is True
+
+
+# ------------------------------------------------------------ a different problem on screen
+
+def test_parse_reply_keeps_the_problem_on_screen_as_data():
+    r = observer.parse_reply('{"activity":"browser","error_visible":false,"error_text":"",'
+                             '"problem_title":"Largest in  Array","problem_statement":"Given an array arr[]...",'
+                             '"summary":"reading a problem on GeeksforGeeks"}')
+    assert r["problem"] == {"title": "Largest in Array", "statement": "Given an array arr[]..."}
+    assert "Problem on screen: Largest in Array." in r["text"]
+    r = observer.parse_reply('{"activity":"editing","error_visible":false,"error_text":"",'
+                             '"problem_title":"","problem_statement":"x","summary":"typing"}')
+    assert r["problem"] is None, "no title, no problem"
+
+
+def test_same_title_is_loose():
+    assert temporal.same_title("Largest in Array", "largest-in-array!")
+    assert not temporal.same_title("Largest in Array", "Two Sum")
+    assert not temporal.same_title("", "")
+
+
+def test_screen_problem_is_offered_kept_and_cleared(g):
+    g.invoke(initial_state("custom-x", "u", "t9", kind="custom"), _cfg("t9"))
+
+    def observe(problem):
+        g.invoke(Command(resume={"type": "observe", "text": "x", "observation": {
+            "text": "x", "tags": {}, "code_revision": 0, "problem": problem}}), _cfg("t9"))
+        return g.get_state(_cfg("t9")).values["temporal"]
+
+    t = observe({"title": "Largest in Array", "statement": "Given an array arr[]"})
+    assert t["screen_problem"]["title"] == "Largest in Array"
+    assert temporal.for_view(t)["screen_problem"]["statement"] == "Given an array arr[]"
+    assert "DIFFERENT problem" in temporal.for_prompt(t)
+
+    t = observe(None)                                 # tabbed to the editor
+    assert t["screen_problem"]["title"] == "Largest in Array"
+
+    t = observe({"title": "echo", "statement": ""})    # this session's own problem (CTX title "Echo")
+    assert t["screen_problem"] is None
+    v = g.get_state(_cfg("t9")).values
+    assert not any(m["role"] == "tutor" for m in v["messages"]), "seeing a problem never starts a turn"

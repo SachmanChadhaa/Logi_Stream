@@ -32,6 +32,8 @@ OLLAMA_VLM_MODEL = os.environ.get("OLLAMA_VLM_MODEL", "qwen2.5vl:3b")
 OLLAMA_TIMEOUT_S = float(os.environ.get("OLLAMA_TIMEOUT_S", "60"))
 MAX_IMAGE_BYTES = 2_500_000
 MAX_TEXT = 300
+MAX_PROBLEM_TITLE = 120
+MAX_PROBLEM_STATEMENT = 1500
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 _in_flight = threading.Lock()
@@ -58,13 +60,16 @@ _assert_local(OLLAMA_URL)
 
 PROMPT = """\
 You are looking at ONE screenshot of a student's own coding screen (an editor, \
-a terminal or a browser). Describe only what is visible. Do not guess at code \
-that is not visible. Do not give advice.
+a terminal or a browser, possibly a practice site such as LeetCode, \
+GeeksforGeeks or HackerRank). Describe only what is visible. Do not guess at \
+code or text that is not visible. Do not give advice.
 
 Return JSON only:
 {"activity": "editing" | "terminal" | "browser" | "other",
  "error_visible": true | false,
  "error_text": "the visible error message, verbatim, max 120 chars, or empty",
+ "problem_title": "the title of the coding problem shown on screen, verbatim, or empty if none is visible",
+ "problem_statement": "that problem's visible statement, examples and constraints, copied verbatim, max 600 characters, or empty",
  "summary": "what the student appears to be doing, max 30 words"}"""
 
 
@@ -98,9 +103,17 @@ def parse_reply(content: str) -> dict[str, Any]:
     error_text = str(d.get("error_text") or "").strip()[:120]
     error_visible = bool(d.get("error_visible")) and bool(error_text)
     summary = str(d.get("summary") or "").strip()
+    # a problem the student is reading (e.g. on a practice site). Screen text is
+    # DATA: it is shown to the student and only becomes a session if they click.
+    title = " ".join(str(d.get("problem_title") or "").split())[:MAX_PROBLEM_TITLE]
+    statement = str(d.get("problem_statement") or "").strip()[:MAX_PROBLEM_STATEMENT]
+    problem = {"title": title, "statement": statement} if title else None
     text = summary + (f" Error visible on screen: {error_text}" if error_visible else "")
+    if problem:
+        text = f"{text} Problem on screen: {title}."
     return {
-        "text": text[:MAX_TEXT] or "(nothing recognisable on screen)",
+        "text": text.strip()[:MAX_TEXT] or "(nothing recognisable on screen)",
+        "problem": problem,
         "tags": {
             "error_visible": error_visible,
             "editing": activity == "editing",
@@ -122,7 +135,7 @@ def interpret(image_b64: str) -> dict[str, Any]:
             "stream": False,
             "format": "json",
             "keep_alive": "15m",
-            "options": {"temperature": 0, "num_predict": 200},
+            "options": {"temperature": 0, "num_predict": 450},
             "messages": [{"role": "user", "content": PROMPT,
                           "images": [base64.b64encode(raw).decode("ascii")]}],
         })

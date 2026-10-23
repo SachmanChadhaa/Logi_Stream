@@ -13,7 +13,7 @@
 //   * frames go to the gateway -> orchestrator -> LOCAL Ollama, and only a short
 //     text observation comes back. "observer unavailable" never stops tutoring.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 import { ApiError, api } from "./api";
 import type { SessionView } from "./types";
@@ -60,18 +60,20 @@ function frameB64(video: HTMLVideoElement): string | null {
   return url.slice(url.indexOf(",") + 1);
 }
 
-export function useScreenObserver({
-  problemId,
-  codeRevision,
-  canSend,
-  onView,
-}: {
+/**
+ * Which session the frames go to right now. The capture itself lives above the
+ * session (in the page), so switching problems re-points it instead of ending
+ * the share; null while no session is mounted, and no frame is sent then.
+ */
+export interface ObserverBinding {
   problemId: string;
   codeRevision: number;
   /** false while a tutor turn is running: an observation would only be skipped */
   canSend: boolean;
   onView: (v: SessionView) => void;
-}) {
+}
+
+export function useScreenObserver(binding: RefObject<ObserverBinding | null>) {
   const [state, setState] = useState<CaptureState>("off");
   const [status, setStatus] = useState<string>("observer off");
   const [unavailable, setUnavailable] = useState(false);
@@ -82,10 +84,6 @@ export function useScreenObserver({
   const lastThumb = useRef<Uint8Array | null>(null);
   const inFlight = useRef(false);
   const stateRef = useRef<CaptureState>("off");
-  const revRef = useRef(codeRevision);
-  const canSendRef = useRef(canSend);
-  revRef.current = codeRevision;
-  canSendRef.current = canSend;
 
   const set = (s: CaptureState) => {
     stateRef.current = s;
@@ -105,7 +103,8 @@ export function useScreenObserver({
   const sample = useCallback(
     async (trigger: "interval" | "run" | "error" | "manual") => {
       const video = videoRef.current;
-      if (stateRef.current !== "on" || !video || inFlight.current || !canSendRef.current) return;
+      const target = binding.current;
+      if (stateRef.current !== "on" || !video || inFlight.current || !target?.canSend) return;
       const t = thumb(video);
       if (t && lastThumb.current && trigger === "interval" &&
           difference(t, lastThumb.current) < SAME_FRAME_THRESHOLD) {
@@ -116,12 +115,13 @@ export function useScreenObserver({
       inFlight.current = true;
       setStatus("looking at your screen…");
       try {
-        const v = await api.observe(problemId, b64, trigger, revRef.current);
+        const v = await api.observe(target.problemId, b64, trigger, target.codeRevision);
         lastThumb.current = t;
         setUnavailable(false);
         setLastObservedAt(Date.now());
         setStatus("observer on");
-        onView(v);
+        // the student may have switched problems while the model was looking
+        if (binding.current?.problemId === target.problemId) binding.current.onView(v);
       } catch (e) {
         if (e instanceof ApiError && e.status === 503) {
           setUnavailable(true);
@@ -135,7 +135,7 @@ export function useScreenObserver({
         inFlight.current = false;
       }
     },
-    [problemId, onView],
+    [binding],
   );
 
   const start = useCallback(async () => {
@@ -188,7 +188,7 @@ export function useScreenObserver({
     return () => clearInterval(id);
   }, [sample]);
 
-  // never leave a capture running after the session view goes away
+  // never leave a capture running after the page goes away
   useEffect(() => stop, [stop]);
 
   return { state, status, unavailable, lastObservedAt, start, stop, pause, resume, sample };

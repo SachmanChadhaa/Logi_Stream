@@ -51,6 +51,8 @@ def empty() -> dict[str, Any]:
         "gru": {"hidden": None, "model_version": None},
         "last_run_code": "",
         "last_event_ts": None,
+        # a DIFFERENT problem the observer saw on screen: {title, statement, ts}
+        "screen_problem": None,
     }
 
 
@@ -169,7 +171,15 @@ def for_view(temporal: dict[str, Any] | None) -> dict[str, Any] | None:
         "next_action": t["next_action"],
         "ranker": t["ranker"],
         "student_state": t["student_state"],
+        "screen_problem": t["screen_problem"],
     }
+
+
+def same_title(a: str | None, b: str | None) -> bool:
+    """Loose title match: case, spacing and punctuation do not matter."""
+    def norm(s: str | None) -> str:
+        return "".join(ch for ch in (s or "").lower() if ch.isalnum())
+    return bool(norm(a)) and norm(a) == norm(b)
 
 
 def for_prompt(temporal: dict[str, Any] | None) -> str:
@@ -180,6 +190,10 @@ def for_prompt(temporal: dict[str, Any] | None) -> str:
         tag = "SEEN ON SCREEN EARLIER (a newer run exists; do not treat as current)" \
             if is_stale(e, t) else ("SEEN ON SCREEN" if e["kind"] == "observation" else e["source"].upper())
         lines.append(f"- {e['ts']} [{e['kind']}, rev {e['code_revision']}, {tag}] {e['text']}")
+    if t.get("screen_problem"):
+        lines.append(f"NOTE: the student's screen currently shows a DIFFERENT problem, "
+                     f"\"{t['screen_problem']['title']}\". This session is still about the problem "
+                     "above; if they ask about the other one, suggest they switch the tutor to it.")
     if t.get("student_state"):
         lines.append(f"ADVISORY STUDENT STATE: {t['student_state'].get('label')} "
                      f"(model {t['student_state'].get('model_version')}, unvalidated)")

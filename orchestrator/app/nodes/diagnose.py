@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app import diagnostics, features_v1, intel_client, temporal, tracing
+from app import diagnostics, domain_client, features_v1, intel_client, temporal, tracing
 from app.nodes.code_tutor import hint_level
 from app.state import SessionState
 
@@ -78,6 +78,25 @@ def _rerank(diagnosis: dict[str, Any], vector: list[float], gru: dict[str, Any] 
         return SHADOW
     cands.sort(key=lambda c: -scores.get(c["id"], float("-inf")))
     return BOOSTED
+
+
+def _screen_problem(state: SessionState, seen: dict[str, Any] | None,
+                    previous: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A problem on screen that is not this session's, or None.
+
+    Nothing switches by itself: the browser offers it, the student decides.
+    A frame with no problem visible keeps the last one (the student may just
+    have tabbed to the editor); seeing this session's own problem clears it.
+    """
+    if not seen or not seen.get("title"):
+        return previous
+    try:
+        current = domain_client.get_problem_context(state["problem_id"]).get("title")
+    except Exception:                               # noqa: BLE001 - advisory only
+        current = None
+    if temporal.same_title(seen["title"], current):
+        return None
+    return {"title": seen["title"], "statement": seen.get("statement") or "", "ts": temporal.now_iso()}
 
 
 def diagnose(state: SessionState) -> dict[str, Any]:
@@ -147,6 +166,7 @@ def diagnose(state: SessionState) -> dict[str, Any]:
         _gru_step(t, vector)
         t = temporal.add_event(t, "observation", obs.get("text") or event.get("text", ""), "screen",
                                code_revision=obs.get("code_revision"))
+        t["screen_problem"] = _screen_problem(state, obs.get("problem"), t.get("screen_problem"))
         log.info("diagnose observation rev=%d tags=%s", t["code_revision"], obs.get("tags"))
 
     else:  # chat
