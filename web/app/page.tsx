@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, CircleAlert, FileQuestion, RotateCw, TriangleAlert, X } from "lucide-react";
 
 import { Assistant, openPipWindow } from "@/components/Assistant";
 
@@ -218,12 +219,14 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
     return (
       <div className="flex h-screen flex-col overflow-hidden">
         <Header view={null} busy={false} onHome={onHome} />
-        <div className="mx-auto mt-16 max-w-md px-4 text-center">
-          <h1 className="font-serif text-xl font-semibold">Problem not found</h1>
-          <p className="mt-2 text-sm text-[var(--muted)]">
+        <div className="mx-auto mt-24 flex max-w-md flex-col items-center px-4 text-center">
+          <FileQuestion size={28} className="text-[var(--faint)]" aria-hidden />
+          <h1 className="mt-3 text-[18px] font-semibold">Problem not found</h1>
+          <p className="mt-1.5 text-[13px] text-[var(--muted)]">
             It does not exist, or it belongs to someone else.
           </p>
-          <button onClick={onHome} className="mt-4 rounded bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)]">
+          <button onClick={onHome} className="btn btn-secondary btn-lg mt-5">
+            <ArrowLeft size={14} aria-hidden />
             Back to problems
           </button>
         </div>
@@ -255,30 +258,26 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
       />
 
       {notice && (
-        <div role="status" className="shrink-0 border-b border-[var(--warn)] bg-[var(--surface-2)] px-5 py-2 text-xs text-[var(--warn)]">
-          {notice}
-          <button onClick={() => setNotice(null)} className="ml-3 underline opacity-70 hover:opacity-100">
-            dismiss
+        <div role="status" className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--warn-bg)] px-4 py-1.5 text-[12px] text-[var(--warn)]">
+          <TriangleAlert size={13} className="shrink-0" aria-hidden />
+          <span className="flex-1">{notice}</span>
+          <button onClick={() => setNotice(null)} className="icon-btn !h-6 !w-6" aria-label="Dismiss">
+            <X size={13} />
           </button>
         </div>
       )}
 
       {error && (
-        <div className="shrink-0 border-b border-[var(--fail)] bg-[var(--fail-bg)] px-5 py-2 text-xs text-[var(--fail)]">
-          {error}
+        <div role="alert" className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--fail-bg)] px-4 py-1.5 text-[12px] text-[var(--fail)]">
+          <CircleAlert size={13} className="shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1 break-words">{error}</span>
           {!view && (
-            <button
-              onClick={() => setAttempt((a) => a + 1)}
-              className="ml-3 underline opacity-70 hover:opacity-100"
-            >
-              retry
+            <button onClick={() => setAttempt((a) => a + 1)} className="btn btn-ghost !h-6 !text-[var(--fail)]">
+              <RotateCw size={12} aria-hidden /> Retry
             </button>
           )}
-          <button
-            onClick={() => setError(null)}
-            className="ml-3 underline opacity-70 hover:opacity-100"
-          >
-            dismiss
+          <button onClick={() => setError(null)} className="icon-btn !h-6 !w-6" aria-label="Dismiss">
+            <X size={13} />
           </button>
         </div>
       )}
@@ -286,7 +285,7 @@ function Session({ problemId, onHome }: { problemId: string; onHome: () => void 
       <main className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <ProblemPane problem={problem} view={view} />
 
-        <section className="relative flex min-h-0 flex-col bg-[var(--background)]">
+        <section className="relative flex min-h-0 flex-col bg-[var(--surface)]">
           {isBusy && <BusyBar label={BUSY_LABEL[busy]} since={busySince} />}
 
           <WorkPane

@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  ArrowRight, BookOpen, ChevronRight, CircleAlert, FileCode2, FolderOpen, Loader2, Lock, Plus, RotateCw, Trash2,
+} from "lucide-react";
 
 import { ApiError, api } from "@/lib/api";
 import type { NewProblem, ProblemSummary } from "@/lib/types";
@@ -26,9 +29,8 @@ const LANGUAGES = [
 type Row = { a: string; b: string; c: string };
 const emptyRow = (): Row => ({ a: "", b: "", c: "" });
 
-const field =
-  "w-full rounded border border-[var(--border)] bg-[var(--background)] p-2 text-sm outline-none focus:border-[var(--accent)] disabled:opacity-50";
-const mono = `${field} font-mono text-xs`;
+const field = "field";
+const mono = "field font-mono !text-[12px]";
 
 function Label({
   children,
@@ -43,9 +45,9 @@ function Label({
 }) {
   const over = max !== undefined && (count ?? 0) > max;
   return (
-    <div className="mb-1 flex items-baseline gap-2">
-      <span className="text-sm font-medium">{children}</span>
-      {hint && <span className="text-xs text-[var(--muted)]">{hint}</span>}
+    <div className="mb-1.5 flex items-baseline gap-2">
+      <span className="text-[12.5px] font-medium text-[var(--foreground-strong)]">{children}</span>
+      {hint && <span className="text-[11px] text-[var(--faint)]">{hint}</span>}
       {max !== undefined && (
         <span
           className={`ml-auto font-mono text-[10px] ${over ? "text-[var(--fail)]" : "text-[var(--muted)]"}`}
@@ -79,7 +81,7 @@ function Rows({
       {rows.map((r, i) => (
         <div
           key={i}
-          className="grid gap-2 rounded border border-[var(--border)] bg-[var(--surface-2)] p-2 sm:grid-cols-[1fr_1fr_1fr_auto]"
+          className="grid gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-2 sm:grid-cols-[1fr_1fr_1fr_auto]"
         >
           <textarea
             aria-label={`${labels[0]} ${i + 1}`}
@@ -111,10 +113,11 @@ function Rows({
             type="button"
             onClick={() => setRows(rows.filter((_, j) => j !== i))}
             disabled={disabled}
-            className="self-start rounded px-2 py-1 text-xs text-[var(--muted)] hover:text-[var(--fail)]"
+            className="icon-btn btn-danger self-start"
             aria-label={`remove ${i + 1}`}
+            title="Remove"
           >
-            ✕
+            <Trash2 size={13} />
           </button>
         </div>
       ))}
@@ -123,9 +126,9 @@ function Rows({
           type="button"
           onClick={() => setRows([...rows, emptyRow()])}
           disabled={disabled}
-          className="rounded border border-dashed border-[var(--border-strong)] px-3 py-1 text-xs text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+          className="btn btn-ghost border !border-dashed !border-[var(--border-strong)]"
         >
-          + {addLabel}
+          <Plus size={13} aria-hidden /> {addLabel}
         </button>
       )}
     </div>
@@ -215,10 +218,13 @@ export function NewProblemForm({ onOpen }: { onOpen: (id: string) => void }) {
 
   return (
     <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[minmax(0,1fr)_19rem]">
         <section>
-          <h1 className="font-serif text-2xl font-semibold">Bring your own problem</h1>
-          <p className="mt-1 mb-6 text-sm text-[var(--muted)]">
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium tracking-wider text-[var(--accent)] uppercase">
+            <FileCode2 size={12} aria-hidden /> New session
+          </p>
+          <h1 className="text-[28px] leading-tight font-semibold">Bring your own problem</h1>
+          <p className="mt-2 mb-8 max-w-xl text-[13.5px] leading-relaxed text-[var(--muted)]">
             Paste an exercise you are stuck on. The tutor will help you reason
             about it and debug your code — it will not hand you the answer.
           </p>
@@ -261,8 +267,8 @@ export function NewProblemForm({ onOpen }: { onOpen: (id: string) => void }) {
                     </option>
                   ))}
                 </select>
-                <p className="mt-1 text-xs text-[var(--muted)]">
-                  Your program reads <span className="font-mono">stdin</span> and prints its answer.
+                <p className="mt-1.5 text-[11px] text-[var(--faint)]">
+                  Your program reads <span className="font-mono text-[var(--muted)]">stdin</span> and prints its answer.
                 </p>
               </div>
             </div>
@@ -289,7 +295,8 @@ export function NewProblemForm({ onOpen }: { onOpen: (id: string) => void }) {
             </div>
 
             {error && (
-              <div role="alert" className="rounded border border-[var(--fail)] bg-[var(--fail-bg)] px-3 py-2 text-xs text-[var(--fail)]">
+              <div role="alert" className="flex items-start gap-2 rounded-[var(--radius)] border border-[var(--fail)]/40 bg-[var(--fail-bg)] px-3 py-2 text-[12px] text-[var(--fail)]">
+                <CircleAlert size={14} className="mt-px shrink-0" aria-hidden />
                 {error}
               </div>
             )}
@@ -298,54 +305,74 @@ export function NewProblemForm({ onOpen }: { onOpen: (id: string) => void }) {
               <button
                 onClick={submit}
                 disabled={busy || !statement.trim()}
-                className="rounded bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--on-accent)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+                className="btn btn-primary btn-lg"
               >
+                {busy ? <Loader2 size={14} className="animate-spin" aria-hidden /> : null}
                 {busy ? "Creating…" : "Start tutoring session"}
+                {!busy && <ArrowRight size={14} aria-hidden />}
               </button>
-              <span className="text-xs text-[var(--muted)]">
-                Your problem is private to you.
+              <span className="flex items-center gap-1.5 text-[11.5px] text-[var(--muted)]">
+                <Lock size={11} aria-hidden /> Your problem is private to you.
               </span>
             </div>
           </div>
         </section>
 
-        <aside className="space-y-6">
-          <div>
-            <h2 className="mb-2 text-sm font-semibold">Try a sample problem</h2>
-            <p className="mb-2 text-xs text-[var(--muted)]">
+        <aside className="space-y-4 lg:pt-[92px]">
+          <div className="panel overflow-hidden">
+            <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--chrome)] px-3 py-2">
+              <BookOpen size={13} className="text-[var(--accent)]" aria-hidden />
+              <h2 className="text-[12px] font-semibold">Try a sample problem</h2>
+            </div>
+            <p className="px-3 pt-2.5 text-[11.5px] text-[var(--muted)]">
               Curated, with a logic-first gate and hidden tests.
             </p>
-            {problems === null && !listError && <p className="text-xs text-[var(--muted)]">Loading…</p>}
-            <ul className="space-y-1">
+            {problems === null && !listError && (
+              <p className="flex items-center gap-2 px-3 py-2 text-[11.5px] text-[var(--muted)]">
+                <Loader2 size={12} className="animate-spin" aria-hidden /> Loading…
+              </p>
+            )}
+            <ul className="p-1.5">
               {samples.map((p) => (
                 <li key={p.id}>
-                  <button onClick={() => onOpen(p.id)} className="w-full rounded border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-sm hover:border-[var(--accent)]">
-                    {p.title}
+                  <button onClick={() => onOpen(p.id)} className="group flex w-full items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-left text-[13px] hover:bg-[var(--surface-2)]">
+                    <FileCode2 size={13} className="text-[var(--faint)]" aria-hidden />
+                    <span className="flex-1 truncate">{p.title}</span>
+                    <ChevronRight size={13} className="text-[var(--faint)] opacity-0 group-hover:opacity-100" aria-hidden />
                   </button>
                 </li>
               ))}
             </ul>
           </div>
 
-          <div>
-            <h2 className="mb-2 text-sm font-semibold">Your problems</h2>
+          <div className="panel overflow-hidden">
+            <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--chrome)] px-3 py-2">
+              <FolderOpen size={13} className="text-[var(--purple)]" aria-hidden />
+              <h2 className="text-[12px] font-semibold">Your problems</h2>
+            </div>
             {listError && (
-              <p className="text-xs text-[var(--fail)]">
-                {listError}{" "}
-                <button onClick={loadList} className="underline">retry</button>
+              <p className="flex items-center gap-2 px-3 py-2.5 text-[11.5px] text-[var(--fail)]">
+                <span className="flex-1">{listError}</span>
+                <button onClick={loadList} className="icon-btn !h-6 !w-6" aria-label="Retry" title="Retry">
+                  <RotateCw size={12} />
+                </button>
               </p>
             )}
             {problems !== null && mine.length === 0 && (
-              <p className="text-xs text-[var(--muted)]">None yet.</p>
+              <p className="px-3 py-2.5 text-[11.5px] text-[var(--faint)]">None yet.</p>
             )}
-            <ul className="space-y-1">
+            <ul className="p-1.5">
               {mine.map((p) => (
                 <li key={p.id}>
-                  <button onClick={() => onOpen(p.id)} className="w-full rounded border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-sm hover:border-[var(--accent)]">
-                    <span className="block truncate">{p.title}</span>
-                    <span className="font-mono text-[10px] text-[var(--muted)]">
-                      {new Date(p.created_at).toLocaleString()}
+                  <button onClick={() => onOpen(p.id)} className="group flex w-full items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-left hover:bg-[var(--surface-2)]">
+                    <FileCode2 size={13} className="shrink-0 text-[var(--faint)]" aria-hidden />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px]">{p.title}</span>
+                      <span className="font-mono text-[10px] text-[var(--faint)]">
+                        {new Date(p.created_at).toLocaleString()}
+                      </span>
                     </span>
+                    <ChevronRight size={13} className="text-[var(--faint)] opacity-0 group-hover:opacity-100" aria-hidden />
                   </button>
                 </li>
               ))}

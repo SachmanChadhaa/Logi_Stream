@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 
+import { ArrowRight, KeyRound, Loader2, RotateCw, WifiOff } from "lucide-react";
+
 import { ApiError, PASSCODE_EVENT, api, passcode } from "@/lib/api";
+import { Logo } from "./Header";
 
 /**
  * Public-demo access control, browser side. The gateway enforces the passcode
@@ -57,15 +60,22 @@ export function PasscodeGate({ children }: { children: React.ReactNode }) {
   if (state === "ok") return <>{children}</>;
 
   return (
-    <div className="flex h-screen items-center justify-center bg-[var(--background)] px-4">
-      <div className="w-full max-w-sm rounded border border-[var(--border)] bg-[var(--surface)] p-6">
-        <h1 className="font-serif text-xl font-semibold">LogiStream</h1>
+    <div className="flex h-screen items-center justify-center bg-[var(--chrome)] px-4">
+      <div className="panel w-full max-w-sm p-6 shadow-[var(--shadow-pop)]">
+        <h1 className="flex items-center gap-2 text-[17px] font-semibold">
+          <Logo /> LogiStream
+        </h1>
         {state === "checking" && (
-          <p className="mt-3 text-sm text-[var(--muted)]">Connecting…</p>
+          <p className="mt-4 flex items-center gap-2 text-[13px] text-[var(--muted)]">
+            <Loader2 size={13} className="animate-spin" aria-hidden /> Connecting…
+          </p>
         )}
         {state === "down" && (
           <>
-            <p className="mt-3 text-sm text-[var(--fail)]">{error}</p>
+            <p className="mt-4 flex items-start gap-2 text-[13px] text-[var(--fail)]">
+              <WifiOff size={14} className="mt-0.5 shrink-0" aria-hidden />
+              {error}
+            </p>
             <p className="mt-2 text-xs text-[var(--muted)]">
               The backend runs on the presenter&apos;s laptop. If it is asleep or
               the tunnel is down, this demo cannot work.
@@ -75,8 +85,9 @@ export function PasscodeGate({ children }: { children: React.ReactNode }) {
                 setState("checking");
                 check();
               }}
-              className="mt-4 rounded bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)]"
+              className="btn btn-secondary mt-4"
             >
+              <RotateCw size={12} aria-hidden />
               Retry
             </button>
           </>
@@ -89,7 +100,8 @@ export function PasscodeGate({ children }: { children: React.ReactNode }) {
               submit();
             }}
           >
-            <label htmlFor="passcode" className="text-sm">
+            <label htmlFor="passcode" className="flex items-center gap-1.5 text-[12.5px] font-medium">
+              <KeyRound size={12} className="text-[var(--muted)]" aria-hidden />
               Demo passcode
             </label>
             <input
@@ -99,15 +111,17 @@ export function PasscodeGate({ children }: { children: React.ReactNode }) {
               value={value}
               onChange={(e) => setValue(e.target.value)}
               disabled={busy}
-              className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--background)] p-2 text-sm outline-none focus:border-[var(--accent)]"
+              className="field mt-1.5"
             />
             {error && <p role="alert" className="mt-2 text-xs text-[var(--fail)]">{error}</p>}
             <button
               type="submit"
               disabled={busy || !value.trim()}
-              className="mt-4 w-full rounded bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)] disabled:opacity-40"
+              className="btn btn-primary btn-lg mt-4 w-full"
             >
+              {busy ? <Loader2 size={14} className="animate-spin" aria-hidden /> : null}
               {busy ? "Checking…" : "Enter"}
+              {!busy && <ArrowRight size={14} aria-hidden />}
             </button>
           </form>
         )}

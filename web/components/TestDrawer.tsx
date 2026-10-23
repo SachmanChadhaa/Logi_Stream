@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronRight, CircleCheck, CircleX, Eye, EyeOff, TriangleAlert } from "lucide-react";
+
 import type { LastExecution, TestResult } from "@/lib/types";
 
 const BUCKET_LABEL: Record<string, string> = {
@@ -22,39 +24,33 @@ function TestRow({ test }: { test: TestResult }) {
     <div className="border-b border-[var(--border)] last:border-b-0">
       <button
         onClick={() => expandable && setOpen((o) => !o)}
-        className={`flex w-full items-center gap-3 px-4 py-2 text-left text-xs ${
+        className={`flex h-8 w-full items-center gap-3 px-4 text-left text-[12px] ${
           expandable ? "hover:bg-[var(--surface-2)]" : "cursor-default"
         }`}
       >
+        <span className={`w-3 ${expandable ? "text-[var(--faint)]" : "invisible"}`}>
+          <ChevronRight size={12} className={`transition-transform ${open ? "rotate-90" : ""}`} aria-hidden />
+        </span>
         <span
-          className={`font-mono ${test.passed ? "text-[var(--pass)]" : "text-[var(--fail)]"}`}
+          className={`flex items-center gap-1 font-mono text-[11px] font-medium ${test.passed ? "text-[var(--pass)]" : "text-[var(--fail)]"}`}
         >
+          {test.passed ? <CircleCheck size={13} aria-hidden /> : <CircleX size={13} aria-hidden />}
           {test.passed ? "PASS" : "FAIL"}
         </span>
-        <span className="font-mono text-[var(--muted)]">#{test.index}</span>
-        <span className="flex-1">{test.label}</span>
-        <span
-          className={`rounded px-1.5 py-0.5 text-[10px] ${
-            test.is_public
-              ? "bg-[var(--surface-2)] text-[var(--accent)]"
-              : "bg-[var(--surface-2)] text-[var(--muted)]"
-          }`}
-        >
+        <span className="font-mono text-[11px] text-[var(--faint)]">#{test.index}</span>
+        <span className="flex-1 truncate">{test.label}</span>
+        <span className={`tag ${test.is_public ? "!text-[var(--accent)]" : ""}`}>
+          {test.is_public ? <Eye size={10} aria-hidden /> : <EyeOff size={10} aria-hidden />}
           {test.is_public ? "public" : "hidden"}
         </span>
-        <span className="w-40 text-right font-mono text-[10px] text-[var(--muted)]">
+        <span className="w-40 text-right font-mono text-[10.5px] text-[var(--muted)]">
           {test.status}
           {test.time ? ` · ${test.time}s` : ""}
         </span>
-        {expandable && (
-          <span className={`text-[var(--muted)] ${open ? "rotate-90" : ""}`}>
-            ▸
-          </span>
-        )}
       </button>
 
       {open && (
-        <div className="space-y-2 bg-[var(--background)] px-4 py-3 font-mono text-[11px]">
+        <div className="space-y-2 border-t border-[var(--border)] bg-[var(--background)] py-3 pr-4 pl-10 font-mono text-[11px]">
           {test.is_public ? (
             <>
               <div>
@@ -113,22 +109,30 @@ export function TestDrawer({ execution }: { execution: LastExecution | null }) {
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)]">
       <button
         onClick={() => setCollapsed((c) => !c)}
-        className="flex w-full items-center gap-3 px-4 py-2 text-left"
+        className="flex h-9 w-full items-center gap-3 bg-[var(--chrome)] px-4 text-left hover:bg-[var(--background)]"
       >
+        <ChevronRight
+          size={13}
+          className={`text-[var(--muted)] transition-transform ${collapsed ? "" : "rotate-90"}`}
+          aria-hidden
+        />
+        <span className="text-[11px] font-semibold tracking-wide text-[var(--muted)] uppercase">Tests</span>
         <span
-          className={`inline-block text-xs transition-transform ${collapsed ? "" : "rotate-90"}`}
+          className={`flex items-center gap-1.5 rounded-[var(--radius)] px-1.5 py-0.5 font-mono text-[11px] font-medium ${
+            accepted
+              ? "bg-[var(--pass-bg)] text-[var(--pass)]"
+              : unverified
+                ? "bg-[var(--warn-bg)] text-[var(--warn)]"
+                : "bg-[var(--fail-bg)] text-[var(--fail)]"
+          }`}
         >
-          ▸
-        </span>
-        <span
-          className={`font-mono text-xs ${accepted ? "text-[var(--pass)]" : unverified ? "text-[var(--warn)]" : "text-[var(--fail)]"}`}
-        >
+          {accepted ? <CircleCheck size={12} aria-hidden /> : unverified ? <TriangleAlert size={12} aria-hidden /> : <CircleX size={12} aria-hidden />}
           {execution.bucket}
         </span>
-        <span className="text-xs text-[var(--muted)]">
+        <span className="truncate text-[11.5px] text-[var(--muted)]">
           {BUCKET_LABEL[execution.bucket] ?? ""}
         </span>
-        <span className="ml-auto font-mono text-xs">
+        <span className="ml-auto shrink-0 font-mono text-[11.5px]">
           <span className={accepted ? "text-[var(--pass)]" : ""}>
             {execution.passed}
           </span>

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronUp, Cpu, DatabaseZap, GitBranch, Hash, LifeBuoy } from "lucide-react";
+
 import type { SessionView } from "@/lib/types";
 
 /**
@@ -49,41 +51,50 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
         : "text-[var(--fail)]";
 
   return (
-    <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)]">
+    <div className="shrink-0 border-t border-[var(--border)] bg-[var(--chrome)]">
+      {/* a status bar, like the editor's: always one line, opens upward */}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-5 py-2 text-left text-xs font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
+        aria-expanded={open}
+        className="flex h-7 w-full items-center gap-3 px-3 text-left text-[11px] text-[var(--muted)] transition-colors hover:bg-[var(--background)] hover:text-[var(--foreground)]"
       >
-        <span
-          className={`inline-block transition-transform ${open ? "rotate-90" : ""}`}
-        >
-          ▸
+        <span className="flex items-center gap-1.5 font-medium">
+          <Cpu size={12} aria-hidden />
+          Under the hood
+          <ChevronUp size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
         </span>
-        Under the hood
         {ev && (
-          <span className={`ml-1 font-mono ${verdictColour}`}>{ev.verdict}</span>
+          <span className={`flex items-center gap-1 font-mono ${verdictColour}`}>
+            <GitBranch size={11} aria-hidden />
+            {ev.verdict}
+          </span>
         )}
         {ev?.cache_hit && (
-          <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--accent)]">
-            cache hit
+          <span className="flex items-center gap-1 font-mono text-[var(--accent)]">
+            <DatabaseZap size={11} aria-hidden /> cache hit
           </span>
         )}
         {dbg?.fallback_used && (
-          <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--warn)]">
-            fallback
+          <span className="flex items-center gap-1 font-mono text-[var(--warn)]">
+            <LifeBuoy size={11} aria-hidden /> fallback
           </span>
         )}
-        <span className="ml-auto font-mono text-[10px]">
-          {dbg?.trace_id ? `trace ${dbg.trace_id.slice(0, 8)}…` : ""}
+        <span className="ml-auto flex items-center gap-1 font-mono text-[10.5px] text-[var(--faint)]">
+          {dbg?.trace_id && (
+            <>
+              <Hash size={11} aria-hidden />
+              trace {dbg.trace_id.slice(0, 8)}
+            </>
+          )}
         </span>
       </button>
 
       {open && (
-        <div className="scroll-thin max-h-72 overflow-y-auto border-t border-[var(--border)] px-5 py-3 text-xs">
+        <div className="scroll-thin max-h-72 overflow-y-auto border-t border-[var(--border)] bg-[var(--surface)] px-5 py-4 text-[11.5px]">
           <div className="grid gap-6 md:grid-cols-2">
             {/* ---- evaluator ---- */}
             <div>
-              <h3 className="mb-1 font-semibold text-[var(--foreground)]">
+              <h3 className="mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
                 Logic evaluation
               </h3>
               {!ev ? (
@@ -137,7 +148,7 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
 
             {/* ---- verifier + graph ---- */}
             <div>
-              <h3 className="mb-1 font-semibold text-[var(--foreground)]">
+              <h3 className="mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
                 Tutor verification &amp; graph
               </h3>
               <Row label="regenerations" mono>
@@ -181,7 +192,7 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
 
               {ex && (
                 <>
-                  <h3 className="mt-3 mb-1 font-semibold text-[var(--foreground)]">
+                  <h3 className="mt-4 mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
                     Last execution
                   </h3>
                   <Row label="bucket" mono>
@@ -203,9 +214,9 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
 
               {dx && (
                 <>
-                  <h3 className="mt-3 mb-1 font-semibold text-[var(--foreground)]">
+                  <h3 className="mt-4 mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
                     Diagnosis{" "}
-                    <span className="font-mono text-[10px] font-normal text-[var(--muted)]">
+                    <span className="font-mono text-[10px] font-normal tracking-normal normal-case text-[var(--muted)]">
                       {dx.ranker}
                     </span>
                   </h3>
@@ -241,9 +252,9 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
 
               {tm && (tm.summary || tm.events.length > 0) && (
                 <>
-                  <h3 className="mt-3 mb-1 font-semibold text-[var(--foreground)]">
+                  <h3 className="mt-4 mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
                     Temporal memory{" "}
-                    <span className="font-mono text-[10px] font-normal text-[var(--muted)]">
+                    <span className="font-mono text-[10px] font-normal tracking-normal normal-case text-[var(--muted)]">
                       rev {tm.code_revision} · {tm.ranker}
                     </span>
                   </h3>
@@ -279,7 +290,7 @@ export function UnderTheHood({ view }: { view: SessionView | null }) {
 
               {!!runs?.length && (
                 <>
-                  <h3 className="mt-3 mb-1 font-semibold text-[var(--foreground)]">
+                  <h3 className="mt-4 mb-2 text-[10.5px] font-semibold tracking-wider text-[var(--faint)] uppercase">
                     Run history
                   </h3>
                   <ul className="space-y-0.5 font-mono text-[10px]">
