@@ -42,6 +42,9 @@ class SessionState(TypedDict, total=False):
     # Temporal memory: one compact record per run (diagnostics.history_entry),
     # newest last, capped. Lets the tutor say what changed since the last run.
     run_history: list[dict[str, Any]]
+    # Rolling summary + last ~20 events + GRU hidden state (app/temporal.py).
+    # Text only: a screenshot never enters state or a checkpoint.
+    temporal: dict[str, Any]
 
     attempts: dict[str, int]                  # {"logic": int, "code": int}
 
@@ -54,6 +57,11 @@ class SessionState(TypedDict, total=False):
 
     # the only reducer: messages accumulate, everything else is last-write-wins
     messages: Annotated[list[dict[str, Any]], operator.add]
+
+
+def _empty_temporal() -> dict[str, Any]:
+    from app import temporal   # local import: temporal imports nothing from here
+    return temporal.empty()
 
 
 def initial_state(
@@ -82,6 +90,7 @@ def initial_state(
         "last_execution": None,
         "last_diagnosis": None,
         "run_history": [],
+        "temporal": _empty_temporal(),
         "attempts": {"logic": 0, "code": 0},
         "draft": None,
         "regenerations": 0,

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app import config, diagnostics, domain_client, llm, redact, verifier
+from app import config, diagnostics, domain_client, llm, redact, temporal, verifier
 from app.prompts.code_tutor import CODE_TUTOR_SYSTEM, build_code_tutor_user
 from app.prompts.custom_tutor import CUSTOM_TUTOR_SYSTEM, build_custom_tutor_user
 from app.state import SessionState, message
@@ -68,6 +68,9 @@ def code_tutor(state: SessionState) -> dict[str, Any]:
             history_summary=diagnostics.describe_history(earlier, diagnostics.code_sha(code)),
             hint_level=hint_level(history) if execution else 1,
             recent_messages=state.get("messages") or [],
+            session_memory=temporal.for_prompt(state.get("temporal")),
+            strategy=(state.get("temporal") or {}).get("strategy") or
+                     ("point-to-evidence" if execution else "clarify-plan"),
         )
     else:
         system = CODE_TUTOR_SYSTEM

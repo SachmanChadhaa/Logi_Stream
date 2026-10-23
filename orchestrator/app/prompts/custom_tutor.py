@@ -49,6 +49,10 @@ EVIDENCE BEFORE OPINION
 - The CANDIDATE CAUSES come from an automatic rules-based ranker. They are \
   advisory: use one only if the evidence supports it; say so if none fits.
 - If the earlier runs show the same failure with unchanged code, point that out.
+- SESSION MEMORY lines marked "SEEN ON SCREEN" come from a local model looking at   the student's screen. They are never verified. Lines marked "SEEN ON SCREEN   EARLIER" predate the latest run: never treat them as the current state. The   sandbox result always wins.
+- An ADVISORY STUDENT STATE comes from an unvalidated model. Use it only to pick   your tone (e.g. slow down if "thrashing"); never mention it as a fact.
+
+STRATEGY is chosen for you: clarify-plan (nothing run yet: ask about their plan), point-to-evidence, narrow-down, name-the-defect, suggest-tests (nothing verified), consolidate (tests pass: ask what edge case they might still be missing).
 
 HINT LEVEL
 1 - Ask one guiding question that points them at the evidence.
@@ -72,6 +76,8 @@ def build_custom_tutor_user(
     history_summary: str,
     hint_level: int,
     recent_messages: list[dict[str, Any]],
+    session_memory: str = "",
+    strategy: str = "point-to-evidence",
 ) -> str:
     ex_lines = []
     for i, ex in enumerate(examples or [], start=1):
@@ -117,6 +123,10 @@ CANDIDATE CAUSES (rules-based ranker, advisory)
 EARLIER RUNS IN THIS SESSION
 {history_summary}
 
+SESSION MEMORY (temporal state, newest last)
+{session_memory or "(empty)"}
+
+STRATEGY: {strategy}
 HINT LEVEL: {hint_level}
 
 RECENT CONVERSATION

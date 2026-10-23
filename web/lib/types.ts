@@ -113,6 +113,44 @@ export interface SessionView {
   // additive (bring-your-own-problem); absent from older servers
   problem_kind?: ProblemKind;
   diagnosis?: Diagnosis | null;
+  temporal?: TemporalView | null;
+}
+
+/** One compact event in the session's temporal memory. Never a screenshot. */
+export interface TemporalEvent {
+  ts: string;
+  kind: "run" | "observation" | "chat" | "edit";
+  text: string;
+  code_revision: number;
+  source: "sandbox" | "screen" | "student";
+  /** a screen observation older than the latest run: shown as "seen earlier" */
+  stale?: boolean;
+}
+
+export interface StudentState {
+  label: "progressing" | "stuck" | "thrashing" | "idle";
+  scores: Record<string, number>;
+  model_version: string;
+}
+
+export interface TemporalView {
+  summary: string;
+  code_revision: number;
+  latest_observation_ts: string | null;
+  events: TemporalEvent[];
+  hypotheses: string[];
+  next_action: string | null;
+  /** which ranker produced the diagnosis: rules-v1 or the Rust sidecar */
+  ranker: string;
+  student_state: StudentState | null;
+}
+
+export interface ObserverStatus {
+  available: boolean;
+  model: string;
+  model_present: boolean;
+  ollama_version: string | null;
+  detail: string;
 }
 
 export interface ProblemExample {

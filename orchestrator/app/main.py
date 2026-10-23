@@ -11,6 +11,7 @@ LLM call.
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -18,7 +19,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from langgraph.types import Command
 from pydantic import BaseModel
 
-from app import config, domain_client, llm, tracing
+from app import config, domain_client, llm, observer, tracing
 from app.checkpointer import build_checkpointer, close_checkpointer
 from app.graph import build_graph
 from app.state import initial_state
@@ -82,6 +83,24 @@ class StartBody(BaseModel):
 class EventBody(BaseModel):
     type: str
     text: str
+
+
+class ObserveBody(BaseModel):
+    image_b64: str
+    trigger: str | None = None          # "interval" | "run" | "error" | "manual"
+    code_revision: int | None = None    # the run revision the browser had when it captured
+
+
+# One graph turn per thread at a time. Two concurrent invokes on the same
+# checkpoint thread would race; an observation arriving mid-tutor-turn is simply
+# skipped (the next sample will catch up), while events wait their turn.
+_thread_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(thread_id: str) -> threading.Lock:
+    with _locks_guard:
+        return _thread_locks.setdefault(thread_id, threading.Lock())
 
 
 # --------------------------------------------------------------------------
@@ -148,7 +167,57 @@ def event(thread_id: str, body: EventBody) -> dict[str, Any]:
     log.info("event: thread=%s type=%s phase=%s chars=%d",
              thread_id, body.type, snapshot.values.get("phase"), len(body.text))
 
-    g.invoke(Command(resume={"type": body.type, "text": body.text}), cfg)
+    with _lock_for(thread_id):
+        g.invoke(Command(resume={"type": body.type, "text": body.text}), cfg)
+    return _view(g, cfg, thread_id)
+
+
+@app.get("/observer/status", dependencies=[Depends(require_token)])
+def observer_status() -> dict[str, Any]:
+    return observer.status()
+
+
+@app.post("/sessions/{thread_id}/observe", dependencies=[Depends(require_token)])
+def observe(thread_id: str, body: ObserveBody) -> dict[str, Any]:
+    """One screen frame -> local VLM -> a text observation in the session.
+
+    The VLM runs BEFORE the graph is touched, so the image never enters graph
+    state or a checkpoint; only the returned text does. If the VLM fails, the
+    session is left exactly as it was and the caller gets 503 with the reason.
+    """
+    g = graph()
+    cfg = {"configurable": {"thread_id": thread_id}}
+    snapshot = g.get_state(cfg)
+    if not snapshot.values:
+        raise HTTPException(status_code=404, detail="no such session; call start first")
+    if snapshot.values.get("phase") == "DONE":
+        raise HTTPException(status_code=409, detail="this session is finished")
+
+    try:
+        obs = observer.interpret(body.image_b64)
+    except observer.BadFrame as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except observer.ObserverUnavailable as e:
+        log.warning("observe: observer unavailable thread=%s: %s", thread_id, e)
+        raise HTTPException(status_code=503, detail=f"observer unavailable: {e}")
+
+    current_rev = int((snapshot.values.get("temporal") or {}).get("code_revision", 0))
+    rev = current_rev if body.code_revision is None else min(int(body.code_revision), current_rev)
+    lock = _lock_for(thread_id)
+    if not lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="session busy; observation skipped")
+    try:
+        g.invoke(Command(resume={
+            "type": "observe",
+            "text": obs["text"],
+            "observation": {"text": obs["text"], "tags": obs["tags"], "code_revision": rev,
+                            "trigger": body.trigger, "model": obs["model"],
+                            "latency_ms": obs["latency_ms"]},
+        }), cfg)
+    finally:
+        lock.release()
+    log.info("observe: thread=%s trigger=%s rev=%d latency=%dms",
+             thread_id, body.trigger, rev, obs["latency_ms"])
     return _view(g, cfg, thread_id)
 
 
@@ -156,7 +225,8 @@ def event(thread_id: str, body: EventBody) -> dict[str, Any]:
 def reset(thread_id: str) -> dict[str, Any]:
     g = graph()
     log.info("reset: deleting checkpoints for thread=%s", thread_id)
-    g.checkpointer.delete_thread(thread_id)
+    with _lock_for(thread_id):
+        g.checkpointer.delete_thread(thread_id)
     return {"ok": True}
 
 

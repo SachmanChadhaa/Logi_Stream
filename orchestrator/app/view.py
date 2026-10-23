@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app import redact
+from app import redact, temporal
 
 # exactly the keys section 5.2 allows out of last_eval; `rationale` is absent
 # on purpose and a test asserts it stays that way
@@ -40,7 +40,12 @@ def _diagnosis_for_view(diagnosis: dict[str, Any] | None) -> dict[str, Any] | No
     it is training data for the future ranker, not something a student needs."""
     if not diagnosis:
         return None
-    return {k: diagnosis.get(k) for k in ("ranker", "score_kind", "bucket", "candidates")}
+    out = {k: diagnosis.get(k) for k in ("ranker", "score_kind", "bucket", "candidates")}
+    # the ranker that actually ordered the list (rules-v1 or the Rust sidecar)
+    out["ranker"] = diagnosis.get("ranker_used") or diagnosis.get("ranker")
+    out["model_version"] = diagnosis.get("model_version")
+    out["iterations"] = diagnosis.get("iterations")
+    return out
 
 
 def build_session_view(
@@ -57,6 +62,7 @@ def build_session_view(
         # additive fields (docs/BYOP.md); curated clients can ignore them
         "problem_kind": values.get("problem_kind") or "curated",
         "diagnosis": _diagnosis_for_view(values.get("last_diagnosis")),
+        "temporal": temporal.for_view(values.get("temporal")),
         "phase": values.get("phase", "LOGIC"),
         "status": values.get("status", "LOGIC_WRITE"),
         "attempts": values.get("attempts") or {"logic": 0, "code": 0},

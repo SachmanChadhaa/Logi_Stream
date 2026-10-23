@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatPanel } from "@/components/ChatPanel";
 import { Header } from "@/components/Header";
 import { NewProblemForm } from "@/components/NewProblemForm";
+import { PasscodeGate } from "@/components/PasscodeGate";
 import { ProblemPane } from "@/components/ProblemPane";
 import { TestDrawer } from "@/components/TestDrawer";
 import { UnderTheHood } from "@/components/UnderTheHood";
@@ -49,17 +50,19 @@ export default function Page() {
 
   if (problemId === undefined) return <div className="h-screen" />;
 
-  if (problemId === null) {
-    return (
-      <div className="flex h-screen flex-col overflow-hidden">
-        <Header view={null} busy={false} />
-        <NewProblemForm onOpen={open} />
-      </div>
-    );
-  }
-
-  // keyed so switching problems starts from a clean slate
-  return <Session key={problemId} problemId={problemId} onHome={() => open(null)} />;
+  return (
+    <PasscodeGate>
+      {problemId === null ? (
+        <div className="flex h-screen flex-col overflow-hidden">
+          <Header view={null} busy={false} />
+          <NewProblemForm onOpen={open} />
+        </div>
+      ) : (
+        // keyed so switching problems starts from a clean slate
+        <Session key={problemId} problemId={problemId} onHome={() => open(null)} />
+      )}
+    </PasscodeGate>
+  );
 }
 
 function Session({ problemId, onHome }: { problemId: string; onHome: () => void }) {

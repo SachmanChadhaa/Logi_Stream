@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app import diagnostics, domain_client
+from app import domain_client
 from app.state import SessionState, message
 
 log = logging.getLogger(__name__)
@@ -14,7 +14,6 @@ NO_TESTS_MESSAGE = (
     "NO_TESTS: your program ran, but this problem has no tests, so nothing was "
     "verified. Add a test (input + expected output) to check it for real."
 )
-MAX_RUN_HISTORY = 20
 
 
 def execute_code(state: SessionState) -> dict[str, Any]:
@@ -53,22 +52,8 @@ def execute_code(state: SessionState) -> dict[str, Any]:
         "node_path": node_path,
     }
 
-    # Rules-baseline diagnosis plus one temporal-memory record per run. Both are
-    # deterministic and side-effect free, so this is safe inside the node. An
-    # infra failure says nothing about the student's code, so it is not recorded.
-    if bucket != "INFRA_ERROR":
-        history = list(state.get("run_history") or [])
-        diagnosis = diagnostics.rank(
-            execution, source, history,
-            problem_kind=state.get("problem_kind") or "curated",
-        )
-        entry = diagnostics.history_entry(
-            execution, source, diagnosis, message("system", "info", "")["ts"])
-        update["last_diagnosis"] = diagnosis
-        update["run_history"] = (history + [entry])[-MAX_RUN_HISTORY:]
-        log.info("execute_code diagnosis ranker=%s top=%s",
-                 diagnosis["ranker"],
-                 [c["id"] for c in diagnosis["candidates"]])
+    # Diagnosis, run history and temporal memory are the diagnose node's job;
+    # this node only runs the code.
 
     if bucket == "INFRA_ERROR":
         update["messages"] = [message("system", "info", INFRA_MESSAGE)]
@@ -85,9 +70,8 @@ def execute_code(state: SessionState) -> dict[str, Any]:
 
 def route_after_execute(state: SessionState) -> str:
     bucket = (state.get("last_execution") or {}).get("bucket")
-    if bucket == "ACCEPTED":
-        return "finish"
     if bucket == "INFRA_ERROR":
-        # no tutor turn: there is nothing about the student's code to discuss
+        # no tutor turn and no diagnosis: there is nothing about the student's
+        # code to discuss, and an infra failure must not enter the run history
         return "await_input"
-    return "code_tutor"
+    return "diagnose"

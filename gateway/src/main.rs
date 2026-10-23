@@ -12,14 +12,25 @@
 //! The thread derivation is the security-relevant part. A client that could
 //! choose its own `thread_id` could read anyone's session, so any `thread_id`
 //! arriving in a body or header is ignored outright.
+//!
+//! PUBLIC DEMO MODE (docs/BYOP.md, demo/DEPLOY_VERCEL.md). When the UI is on
+//! Vercel and this gateway sits behind a Cloudflare tunnel, three more guards
+//! apply, because behind it is a subprocess "sandbox" that is NOT a security
+//! sandbox:
+//!   * DEMO_PASSCODE: every /api call must carry X-Demo-Passcode
+//!   * CORS_ORIGIN: a comma-separated allow-list (plus localhost:3000)
+//!   * a per-passcode rate limit on code runs and screen observations
 
-use std::time::Duration;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{Path, State},
-    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
+    extract::{DefaultBodyLimit, Path, Request, State},
+    http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -33,6 +44,11 @@ const TRACE_HEADER: &str = "x-trace-id";
 const INTERNAL_TOKEN_HEADER: &str = "x-internal-token";
 const USER_HEADER: &str = "x-user-id";
 const DEMO_USER_HEADER: &str = "x-demo-user";
+const PASSCODE_HEADER: &str = "x-demo-passcode";
+
+/// A downscaled JPEG frame as base64 is well under this; anything bigger is
+/// either a full-resolution frame the browser should have shrunk, or abuse.
+const MAX_OBSERVE_BODY: usize = 3 * 1024 * 1024;
 
 #[derive(Clone)]
 struct AppState {
@@ -41,6 +57,110 @@ struct AppState {
     domain_url: String,
     internal_token: String,
     demo_user_id: String,
+    /// None = local development, no passcode required (logged loudly at startup)
+    passcode: Option<String>,
+    limiter: Arc<RateLimiter>,
+}
+
+// ------------------------------------------------------------ rate limiting
+
+/// Sliding-window limiter, in memory. One gateway process serves one demo, so
+/// nothing fancier is needed; a restart resets it, which is fine.
+struct RateLimiter {
+    window: Duration,
+    runs_per_window: usize,
+    observes_per_window: usize,
+    hits: Mutex<HashMap<String, VecDeque<Instant>>>,
+}
+
+impl RateLimiter {
+    fn new(runs_per_min: usize, observes_per_min: usize) -> Self {
+        Self {
+            window: Duration::from_secs(60),
+            runs_per_window: runs_per_min,
+            observes_per_window: observes_per_min,
+            hits: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Ok(()) and records the hit, or Err(seconds until a slot frees up).
+    fn check(&self, key: &str, limit: usize, now: Instant) -> Result<(), u64> {
+        let mut hits = self.hits.lock().unwrap_or_else(|e| e.into_inner());
+        let q = hits.entry(key.to_string()).or_default();
+        while q.front().is_some_and(|t| now.duration_since(*t) >= self.window) {
+            q.pop_front();
+        }
+        if q.len() >= limit {
+            let oldest = *q.front().expect("non-empty when at limit");
+            let wait = self.window.saturating_sub(now.duration_since(oldest));
+            return Err(wait.as_secs().max(1));
+        }
+        q.push_back(now);
+        Ok(())
+    }
+}
+
+/// Rate-limit key: per passcode, as the brief specifies. Without a passcode
+/// (local dev) everything shares one bucket.
+fn limiter_key(headers: &HeaderMap, kind: &str) -> String {
+    let pass = headers
+        .get(PASSCODE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("local");
+    // never keep the passcode itself as a map key
+    let mut h = Sha256::new();
+    h.update(pass.as_bytes());
+    format!("{kind}:{}", &hex::encode(h.finalize())[..16])
+}
+
+fn too_many(retry_after: u64, what: &str) -> Response {
+    let mut res = (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(json!({ "detail": format!("too many {what}; try again in {retry_after}s") })),
+    )
+        .into_response();
+    if let Ok(v) = HeaderValue::from_str(&retry_after.to_string()) {
+        res.headers_mut().insert("retry-after", v);
+    }
+    res
+}
+
+// ---------------------------------------------------------------- passcode
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Middleware on every /api route. CORS preflights never reach it (the CORS
+/// layer sits outside and answers OPTIONS itself), and /health is not under it.
+async fn require_passcode(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    if let Some(expected) = &state.passcode {
+        if req.method() != Method::OPTIONS {
+            let ok = req
+                .headers()
+                .get(PASSCODE_HEADER)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|got| constant_time_eq(got.as_bytes(), expected.as_bytes()));
+            if !ok {
+                warn!(path = %req.uri().path(), "rejected: missing or wrong demo passcode");
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({ "detail": "passcode required", "code": "passcode_required" })),
+                )
+                    .into_response();
+            }
+        }
+    }
+    next.run(req).await
+}
+
+/// Lets the UI check a passcode before showing anything. The middleware has
+/// already accepted it by the time this runs.
+async fn auth_check(State(state): State<AppState>) -> impl IntoResponse {
+    Json(json!({ "ok": true, "passcode_required": state.passcode.is_some() }))
 }
 
 // ---------------------------------------------------------------- identity
@@ -209,6 +329,18 @@ async fn session_event(
     let user_id = resolve_user(&headers, &state);
     let thread_id = derive_thread_id(&user_id, &body.problem_id);
 
+    // code runs execute student code on this laptop: rate-limited per passcode
+    if body.event_type == "code" {
+        let key = limiter_key(&headers, "run");
+        if let Err(wait) = state
+            .limiter
+            .check(&key, state.limiter.runs_per_window, Instant::now())
+        {
+            warn!(trace_id = %trace_id, "run rate limit hit");
+            return too_many(wait, "code runs");
+        }
+    }
+
     info!(
         trace_id = %trace_id, thread_id = %thread_id,
         event_type = %body.event_type, chars = body.text.len(),
@@ -272,6 +404,55 @@ async fn get_session(
         Some(&user_id),
     )
     .await
+}
+
+/// One screen observation (docs/BYOP.md, observer). The frame is passed
+/// through to Python, which sends it to LOCAL Ollama only and keeps nothing but
+/// a short text observation. The gateway never stores or logs the image.
+async fn observe(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let trace_id = resolve_trace_id(&headers);
+    let user_id = resolve_user(&headers, &state);
+    let Some(problem_id) = body.get("problem_id").and_then(|v| v.as_str()) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "detail": "problem_id is required" })),
+        )
+            .into_response();
+    };
+    let thread_id = derive_thread_id(&user_id, problem_id);
+
+    let key = limiter_key(&headers, "observe");
+    if let Err(wait) = state
+        .limiter
+        .check(&key, state.limiter.observes_per_window, Instant::now())
+    {
+        return too_many(wait, "screen observations");
+    }
+
+    let image_chars = body.get("image_b64").and_then(|v| v.as_str()).map_or(0, str::len);
+    info!(trace_id = %trace_id, thread_id = %thread_id, image_chars, "observe");
+
+    // forward only the fields Python needs; anything else the client sent
+    // (a thread_id, say) is dropped here
+    let payload = json!({
+        "image_b64": body.get("image_b64"),
+        "trigger": body.get("trigger"),
+        "code_revision": body.get("code_revision"),
+    });
+    let url = format!("{}/sessions/{}/observe", state.orchestrator_url, thread_id);
+    proxy(&state, reqwest::Method::POST, &url, Some(payload), &trace_id, Some(&user_id)).await
+}
+
+/// Is the local VLM reachable, and which model? Lets the UI say "observer
+/// unavailable" honestly before the student turns capture on.
+async fn observer_status(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let trace_id = resolve_trace_id(&headers);
+    let url = format!("{}/observer/status", state.orchestrator_url);
+    proxy(&state, reqwest::Method::GET, &url, None, &trace_id, None).await
 }
 
 // ------------------------------------------------------------------ proxy
@@ -365,6 +546,24 @@ async fn proxy(
 
 // ------------------------------------------------------------------- main
 
+/// The configured origins plus local dev, de-duplicated, invalid ones skipped.
+fn allowed_origins(configured: &str) -> Vec<HeaderValue> {
+    let mut out: Vec<HeaderValue> = Vec::new();
+    for o in configured
+        .split(',')
+        .map(|s| s.trim().trim_end_matches('/'))
+        .chain(["http://localhost:3000", "http://127.0.0.1:3000"])
+        .filter(|s| !s.is_empty())
+    {
+        match o.parse::<HeaderValue>() {
+            Ok(v) if !out.contains(&v) => out.push(v),
+            Ok(_) => {}
+            Err(_) => warn!(origin = %o, "ignoring an unparsable CORS origin"),
+        }
+    }
+    out
+}
+
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
@@ -385,6 +584,12 @@ async fn main() {
     // v4-only listener first spends ~2s failing on ::1).
     let bind = env_or("GATEWAY_BIND", "0.0.0.0");
     let cors_origin = env_or("CORS_ORIGIN", "http://localhost:3000");
+    let passcode = std::env::var("DEMO_PASSCODE")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let runs_per_min: usize = env_or("RUN_RATE_LIMIT_PER_MIN", "12").parse().unwrap_or(12);
+    let observes_per_min: usize = env_or("OBSERVE_RATE_LIMIT_PER_MIN", "12").parse().unwrap_or(12);
 
     let state = AppState {
         // reqwest has NO overall timeout unless you set one (trap 8). A tutor
@@ -397,32 +602,51 @@ async fn main() {
         domain_url: env_or("DOMAIN_URL_FOR_GATEWAY", "http://localhost:8080"),
         internal_token: env_or("INTERNAL_TOKEN", "dev-internal-token-change-me"),
         demo_user_id: env_or("DEMO_USER_ID", "demo-user"),
+        passcode: passcode.clone(),
+        limiter: Arc::new(RateLimiter::new(runs_per_min, observes_per_min)),
     };
+
+    if passcode.is_none() {
+        warn!(
+            "DEMO_PASSCODE is not set: /api is OPEN. Fine on localhost; never put this \
+             behind a public tunnel without it (demo/DEPLOY_VERCEL.md)"
+        );
+    }
 
     // The browser sends X-Demo-User and reads X-Trace-Id, so both must be
     // allowed through the preflight or the POSTs fail with an opaque CORS error
     // (trap 6).
+    //
+    // CORS_ORIGIN may list several origins (comma-separated), e.g. the Vercel
+    // deployment plus a preview URL. Local dev origins are always allowed. An
+    // unparsable entry is skipped, never widened to "any".
+    let origins = allowed_origins(&cors_origin);
     let cors = CorsLayer::new()
-        .allow_origin(
-            cors_origin
-                .parse::<HeaderValue>()
-                .map(tower_http::cors::AllowOrigin::exact)
-                .unwrap_or_else(|_| tower_http::cors::AllowOrigin::any()),
-        )
+        .allow_origin(tower_http::cors::AllowOrigin::list(origins.clone()))
         .allow_methods(Any)
         .allow_headers(Any)
         .expose_headers([HeaderName::from_static(TRACE_HEADER)]);
 
     // Axum 0.8 path params are `/{id}`; the 0.7 `/:id` syntax panics at
     // startup rather than failing to compile (trap 5).
-    let app = Router::new()
-        .route("/health", get(health))
+    let api = Router::new()
+        .route("/api/auth/check", get(auth_check))
+        .route("/api/observer/status", get(observer_status))
+        .route(
+            "/api/sessions/observe",
+            post(observe).layer(DefaultBodyLimit::max(MAX_OBSERVE_BODY)),
+        )
         .route("/api/problems", get(list_problems).post(create_problem))
         .route("/api/problems/{problem_id}", get(get_problem))
         .route("/api/sessions/start", post(start_session))
         .route("/api/sessions/event", post(session_event))
         .route("/api/sessions/reset", post(reset_session))
         .route("/api/sessions/{problem_id}", get(get_session))
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_passcode));
+
+    let app = Router::new()
+        .route("/health", get(health))
+        .merge(api)
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state.clone());
@@ -433,8 +657,11 @@ async fn main() {
         .unwrap_or_else(|e| panic!("cannot bind {addr}: {e}"));
 
     info!(
-        "gateway listening on {addr} -> orchestrator {} / domain {} (cors: {cors_origin})",
-        state.orchestrator_url, state.domain_url
+        "gateway listening on {addr} -> orchestrator {} / domain {} (cors: {:?}, passcode: {})",
+        state.orchestrator_url,
+        state.domain_url,
+        origins,
+        if state.passcode.is_some() { "required" } else { "OFF" }
     );
 
     axum::serve(listener, app)
@@ -513,5 +740,41 @@ mod tests {
         );
         assert_eq!(encode_path_segment("../internal"), "%2E%2E%2Finternal");
         assert_eq!(encode_path_segment("a?b#c"), "a%3Fb%23c");
+    }
+
+    #[test]
+    fn rate_limiter_blocks_then_frees_up() {
+        let l = RateLimiter::new(2, 1);
+        let t0 = Instant::now();
+        assert!(l.check("k", 2, t0).is_ok());
+        assert!(l.check("k", 2, t0).is_ok());
+        let wait = l.check("k", 2, t0).expect_err("third hit inside the window is refused");
+        assert!(wait >= 1 && wait <= 60);
+        assert!(l.check("other", 2, t0).is_ok(), "keys are independent");
+        assert!(l.check("k", 2, t0 + Duration::from_secs(61)).is_ok(), "window slides");
+    }
+
+    #[test]
+    fn passcode_compare() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+    }
+
+    #[test]
+    fn cors_list_always_has_localhost_and_never_any() {
+        let o = allowed_origins("https://logistream.vercel.app/, not a header\u{0}, ");
+        assert!(o.contains(&HeaderValue::from_static("https://logistream.vercel.app")));
+        assert!(o.contains(&HeaderValue::from_static("http://localhost:3000")));
+        assert!(!o.iter().any(|v| v == "*"));
+        assert_eq!(o.len(), 3);
+    }
+
+    #[test]
+    fn limiter_key_never_contains_the_passcode() {
+        let mut h = HeaderMap::new();
+        h.insert(PASSCODE_HEADER, HeaderValue::from_static("hunter2"));
+        let k = limiter_key(&h, "run");
+        assert!(k.starts_with("run:") && !k.contains("hunter2"));
     }
 }

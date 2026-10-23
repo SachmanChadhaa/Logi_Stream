@@ -7,10 +7,15 @@ restart once PostgresSaver is in.
     START -> await_input --(logic)--> evaluate_logic --PASS/FLAGGED--> summarize_logic -> await_input
                  |                          '--FAIL--> logic_tutor <=> verify_logic ---> await_input
                  |--(chat, LOGIC)---------------------> logic_tutor <=> verify_logic --> await_input
-                 |--(code)--> execute_code --ACCEPTED--> finish -> END
-                 |                 |--INFRA_ERROR--(system message, no tutor)---------> await_input
-                 |                 '--other------------> code_tutor <=> verify_code --> await_input
-                 '--(chat, CODE)----------------------> code_tutor <=> verify_code ---> await_input
+                 |--(code)--> execute_code --INFRA_ERROR--(system message, no tutor)--> await_input
+                 |                 '--> diagnose --ACCEPTED--> finish -> END
+                 |                         '--other--> code_tutor <=> verify_code ------> await_input
+                 |--(chat, CODE)--> diagnose --> code_tutor <=> verify_code ------------> await_input
+                 '--(observe)-----> diagnose -----------------------------------------> await_input
+
+diagnose (CLAUDE_CODE_BRIEF step 4) is deterministic: rules ranker, the optional
+Rust GRU/booster sidecar, temporal memory. It never calls the LLM, so an
+observation never costs a tutor turn.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.nodes.await_input import await_input, route_after_input
 from app.nodes.code_tutor import code_tutor, route_after_verify_code, verify_code
+from app.nodes.diagnose import diagnose, route_after_diagnose
 from app.nodes.evaluate_logic import evaluate_logic, route_after_eval
 from app.nodes.execute_code import execute_code, route_after_execute
 from app.nodes.finish import finish
@@ -40,6 +46,7 @@ def build_graph(checkpointer=None):
     g.add_node("verify_logic", verify_logic)
     g.add_node("summarize_logic", summarize_logic)
     g.add_node("execute_code", execute_code)
+    g.add_node("diagnose", diagnose)
     g.add_node("code_tutor", code_tutor)
     g.add_node("verify_code", verify_code)
     g.add_node("finish", finish)
@@ -53,7 +60,7 @@ def build_graph(checkpointer=None):
             "evaluate_logic": "evaluate_logic",
             "logic_tutor": "logic_tutor",
             "execute_code": "execute_code",
-            "code_tutor": "code_tutor",
+            "diagnose": "diagnose",
             "await_input": "await_input",
         },
     )
@@ -76,6 +83,11 @@ def build_graph(checkpointer=None):
     g.add_conditional_edges(
         "execute_code",
         route_after_execute,
+        {"diagnose": "diagnose", "await_input": "await_input"},
+    )
+    g.add_conditional_edges(
+        "diagnose",
+        route_after_diagnose,
         {"finish": "finish", "code_tutor": "code_tutor", "await_input": "await_input"},
     )
     g.add_edge("code_tutor", "verify_code")
