@@ -382,7 +382,7 @@ def test_nothing_run_means_nothing_verified(monkeypatch):
 
 def test_gpu_garbage_is_named_not_parsed():
     for junk in ("", "@@@@@@@@@@@@"):
-        with pytest.raises(observer.ObserverUnavailable, match="GPU fault"):
+        with pytest.raises(observer.ObserverUnavailable, match="GPU backend fault.*vulkan"):
             observer.parse_reply(junk)
 
 

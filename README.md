@@ -63,7 +63,7 @@ Compared with the original MVP (one problem, hosted Judge0, cloud LLM, light UI)
 | **Temporal memory** | Per-session memory in the LangGraph checkpoint: rolling summary, last 20 events, code revision, open hypotheses, next action, student state, GRU hidden state. Screen observations go **stale** after a newer run. |
 | **Diagnosis** | Deterministic `diagnose` node: rules-v1 ranker with quoted evidence, feature schema v1 (30 numbers), at most two passes. |
 | **Rust `intel/` sidecar** | A GRU (burn) for student state and an XGBoost-style booster written from scratch in Rust, cross-checked against real xgboost (99.8 % agreement). Synthetic-trained v0, advisory, **shadow mode**. Explained step by step in the [Colab notebook](notebooks/LogiStream_GRU_XGBoost.ipynb). |
-| **Local LLM** | LiteLLM → local Ollama `qwen3-14b` (8k context, thinking off). OpenRouter kept only as a backup group. |
+| **Local LLM** | LiteLLM → local Ollama `qwen3:8b` (8k context, thinking off; fits an 8 GB GPU). OpenRouter kept only as a backup group. |
 | **Public-demo guards** | Demo passcode on every `/api` call, CORS allow-list, per-passcode rate limits; Vercel UI + Cloudflare tunnel runbook. |
 | **UI** | Cursor Dark theme, Lucide icons, Monaco `cursor-dark` editor theme, Siri-style animated orb, status-bar "Under the hood" panel. |
 | **Removed** | The hosted **Judge0** integration (client, config, smoke script, env vars). All code runs in the local Python sandbox. |
@@ -87,7 +87,7 @@ flowchart LR
     GW --> DOM["Java domain :8080<br/>Spring Boot · JdbcTemplate"]
     ORCH --> DOM
     ORCH -->|"2 s timeout,<br/>rules fallback"| INTEL["Rust intel :8003<br/>GRU + booster"]
-    ORCH --> LLM["LiteLLM :4000"] --> OLL["Ollama :11434<br/>qwen3-14b (text)<br/>qwen2.5vl:3b (vision)"]
+    ORCH --> LLM["LiteLLM :4000"] --> OLL["Ollama :11434<br/>qwen3:8b (text)<br/>qwen2.5vl:3b (vision)<br/>Vulkan backend"]
     ORCH -->|frames, local only| OLL
     DOM --> SBX["Local Python sandbox<br/>(subprocess)"]
     DOM --> PG[("Postgres 16<br/>app.* and checkpoints")]
@@ -239,10 +239,10 @@ flowchart TD
   refuses to start. Frames are validated (JPEG/PNG, ≤ 2.5 MB), one VLM call at a
   time, never written to disk or the checkpoint; only short text is kept.
   Capture is visible, pausable and stops with the browser's own "Stop sharing".
-* **GPU faults are named.** On this laptop's GPU a driver fault makes every
-  reply `@@@@`; the observer reports "a GPU fault; restart Ollama, or the laptop"
-  instead of a parse error. `OLLAMA_VLM_NUM_GPU=0` runs vision on the CPU as an
-  emergency fallback (~1–2 min per frame).
+* **GPU faults are named.** If the vision model answers `@@@@` (Ollama's CUDA
+  backend on an RTX 5050), the observer says so and how to fix it instead of a
+  parse error. `OLLAMA_VLM_NUM_GPU=0` runs vision on the CPU as an emergency
+  fallback (~1–2 min per frame). See "GPU notes" in §11.
 
 ---
 
@@ -392,12 +392,43 @@ specified in `CLAUDE.md` §5.2 and extended additively in `docs/BYOP.md`.
 Maven, Rust (GNU toolchain), Python 3.11 via `uv`, and Ollama with:
 
 ```bash
-ollama create logistream-qwen3 -f ollama/Modelfile.logistream-qwen3
+ollama pull qwen3:8b
+```
+
+```bash
+ollama create logistream-qwen3-8b -f ollama/Modelfile.logistream-qwen3-8b
 ```
 
 ```bash
 ollama pull qwen2.5vl:3b
 ```
+
+**GPU notes (8 GB cards, tested on an RTX 5050 laptop GPU, Ollama 0.32.7).**
+Measured on 2026-10-24:
+
+| Setup | Result |
+|---|---|
+| CUDA backend, `qwen2.5vl:3b` with an image | every answer `@@@@` (text-only prompts are fine) |
+| CUDA backend, `qwen3-14b` (needs ~10.8 GB, split GPU+CPU) | crash: `MUL_MAT failed`, `0xc0000409` |
+| Vulkan, `qwen3-14b` split | works, ~5 tok/s (tutor reply ~106 s) |
+| **Vulkan, `qwen3:8b`** (6.2 GB, all on GPU) | **~23 tok/s (tutor reply ~6–30 s)** |
+| **Vulkan, `qwen2.5vl:3b`** | **reads the test frame's 9 code lines exactly, ~8 s warm** |
+| Vulkan, `qwen3-vl:4b` | empty answers (all output goes to "thinking"), 3–5 min a frame |
+
+So on this machine Ollama must run on **Vulkan**. `demo/start.sh` passes
+`OLLAMA_LLM_LIBRARY=vulkan` from `.env` to the `ollama serve` it starts, and
+restarts one it started earlier on another backend. The Ollama tray app reads
+Windows user environment variables instead; set them once and restart the app:
+
+```bash
+setx OLLAMA_LLM_LIBRARY vulkan
+```
+
+```bash
+setx OLLAMA_VULKAN 1
+```
+
+On GPUs where CUDA works, leave `OLLAMA_LLM_LIBRARY` empty.
 
 **Configure:** copy `.env.example` to `.env` and fill it in (never commit `.env`).
 
@@ -466,8 +497,8 @@ ollama/                 Modelfile for the 8k-context tutor model
 * Mocked auth: identities are anonymous per browser.
 * Only Python executes; other languages on screen are reviewed, not run.
 * The vision model is 3B and runs on an 8 GB laptop GPU: it can misread small
-  text, and it shares VRAM with the 14B text model, so the first turn after a
-  swap can take over a minute (free Cloudflare tunnels cut responses at ~100 s).
+  text, and the GPU cannot hold it and the 8B text model at once, so Ollama
+  swaps them (a few extra seconds on the first turn after a swap).
 * The ML models are trained on scripted, synthetic sessions and are not
   validated on real students.
 * Picture-in-Picture, screen capture and Web Speech need Chrome.

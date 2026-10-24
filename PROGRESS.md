@@ -292,5 +292,21 @@ Measured: VLM 3.1–3.2 s/frame (2.9 GB, 100% GPU); text model 10 GB (42% CPU), 
 | Assistant: fresh look before questions, hint escalation on repeats, "already said", test-input suggestions, "reading your code" line | ✅ |
 | `README.md` (architecture, flows, data model, ML, API, running, tests) | ✅ |
 | `notebooks/LogiStream_GRU_XGBoost.ipynb` (+ generator) | ✅ executed locally |
-| Live vision on this laptop's GPU | ❌ GPU fault (`@@@@` replies); verified on CPU via `OLLAMA_VLM_NUM_GPU=0`; reboot needed |
+| Live vision on this laptop's GPU | ✅ fixed below (Vulkan backend); a reboot did not help |
+
+## 2026-10-24 — GPU fixed: Vulkan backend, qwen3:8b text model
+
+Root cause (not a hung driver; it survived a reboot): Ollama 0.32.7's CUDA
+builds (v12 and v13) on the RTX 5050 (compute 12.0, driver 610.74) answer every
+image with `@@@@`, and crash (`MUL_MAT failed`, `0xc0000409`) on any model split
+across GPU and CPU. qwen3-14b needs ~10.8 GB, so it was always split.
+
+| Item | Status |
+|---|---|
+| Ollama on Vulkan (`OLLAMA_LLM_LIBRARY=vulkan`; `.env`, user env for the tray app; `start.sh` restarts a wrong-backend server it started) | ✅ |
+| Text model qwen3-14b -> qwen3:8b (`ollama/Modelfile.logistream-qwen3-8b`, LiteLLM) | ✅ 23 tok/s all-GPU; tutor reply 106 s -> 21 s on the same prompt |
+| Vision `qwen2.5vl:3b` on Vulkan: test frame code 9/9 lines exact, ~8 s warm | ✅ |
+| `qwen3-vl:4b` tried: empty answers (thinking only), 3–5 min a frame | ❌ not used |
+| E2E (gateway): observe 16–27 s; from-screen analysis 31–36 s with examples, signature, O(n)/O(1), 4–6 test inputs; repeat guard fired and forced rewrites | ✅ |
+| Screen-analysis prompt: constraints copied only, never invented; vision statement cap 600 -> 1200 chars | ✅ pytest 137 |
 

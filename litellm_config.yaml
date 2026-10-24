@@ -38,11 +38,18 @@ model_list:
   # is how this container reaches Ollama on the host.
   # OpenRouter stays as the backup group, so restoring a working cloud model is
   # a one-line change there.
+  # 2026-10-24: qwen3-14b -> qwen3-8b (ollama/Modelfile.logistream-qwen3-8b).
+  # The 14B needs ~10.8 GB, so on the 8 GB card it was split GPU+CPU: ~5 tok/s
+  # on Vulkan and a crash (0xc0000409) on CUDA. The 8B fits in VRAM (6.2 GB):
+  # ~23 tok/s. Same prompts, Vulkan, 14B -> 8B: screen-problem analysis
+  # 288 s -> 145 s, tutor reply 106 s -> 21 s; outputs equally correct on that check.
+  # Rebuild locally: ollama pull qwen3:8b && ollama create logistream-qwen3-8b
+  #   -f ollama/Modelfile.logistream-qwen3-8b
 
   # ---------------------------------------------------------------- evaluator
   - model_name: logistream-evaluator
     litellm_params:
-      model: ollama_chat/logistream-qwen3
+      model: ollama_chat/logistream-qwen3-8b
       api_base: os.environ/OLLAMA_API_BASE_FOR_LITELLM
       temperature: 0
 
@@ -57,7 +64,7 @@ model_list:
   # Every output is machine-verified downstream, so a weaker fallback is safe.
   - model_name: logistream-tutor
     litellm_params:
-      model: ollama_chat/logistream-qwen3
+      model: ollama_chat/logistream-qwen3-8b
       api_base: os.environ/OLLAMA_API_BASE_FOR_LITELLM
 
   - model_name: logistream-tutor-backup

@@ -74,7 +74,7 @@ Return JSON only:
  "error_visible": true | false,
  "error_text": "the visible error message, verbatim, max 120 chars, or empty",
  "problem_title": "the title of the coding problem shown on screen, verbatim, or empty if none is visible",
- "problem_statement": "that problem's visible statement, examples and constraints, copied verbatim, max 600 characters, or empty",
+ "problem_statement": "that problem's visible statement, examples and constraints, copied verbatim, max 1200 characters (keep the constraints), or empty",
  "code_visible": true | false,
  "code_language": "the programming language of the code in the editor (e.g. C, C++, Java, Python), or empty",
  "summary": "what the student appears to be doing, max 30 words"}"""
@@ -122,10 +122,11 @@ def parse_reply(content: str) -> dict[str, Any]:
     """Model JSON -> {text, tags}. Tolerant of fences; never invents an error."""
     s = (content or "").strip()
     if not s or set(s) <= set("@!#"):
-        # seen on this laptop's GPU: after a driver fault every answer is empty
-        # or a run of '@'. Say what it is instead of a cryptic parse error.
-        raise ObserverUnavailable("the vision model is returning garbage (a GPU fault); "
-                                  "restart Ollama, or the laptop if that does not help")
+        # seen on an RTX 5050: Ollama's CUDA backend answers every image with a
+        # run of '@' (text prompts are fine). Vulkan reads the same frames
+        # correctly. Say what it is instead of a cryptic parse error.
+        raise ObserverUnavailable("the vision model is returning garbage (a GPU backend fault); "
+                                  "restart Ollama with OLLAMA_LLM_LIBRARY=vulkan")
     if s.startswith("```"):
         s = s.strip("`")
         s = s[s.find("{"):] if "{" in s else s
@@ -173,12 +174,12 @@ def interpret(image_b64: str) -> dict[str, Any]:
     image = base64.b64encode(raw).decode("ascii")
     del raw
     try:
-        r = _ask(PROMPT, image, json_mode=True, num_predict=500)
+        r = _ask(PROMPT, image, json_mode=True, num_predict=800)
         if r.status_code == 500 and "grammar" in r.text:
             # llama.cpp's JSON grammar can abort mid-answer; the parser below
             # tolerates free text, so ask once more without the grammar
             log.warning("observer: JSON mode failed (%s); retrying without it", r.text[:120])
-            r = _ask(PROMPT, image, json_mode=False, num_predict=500)
+            r = _ask(PROMPT, image, json_mode=False, num_predict=800)
         transcript = None
         if r.status_code == 200:
             try:
