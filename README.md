@@ -181,7 +181,7 @@ sequenceDiagram
     G->>O: /problems/from-screen {thread}
     O->>L: analyse: examples, constraints, signature, complexity, test inputs
     O->>J: POST /internal/problems (source=screen, insights)
-    J-->>B: new problem id → new session; capture keeps running
+    J-->>B: new problem id → new session, capture keeps running
 ```
 
 The screen text never comes from the browser request: the server takes it from
@@ -206,7 +206,7 @@ stateDiagram-v2
     execute_code --> diagnose
     await_input --> diagnose: chat (code phase) / observe
     diagnose --> finish: ACCEPTED
-    diagnose --> await_input: observe (quiet: no tutor turn)
+    diagnose --> await_input: observe (quiet, no tutor turn)
     diagnose --> code_tutor
     code_tutor --> verify_code
     verify_code --> code_tutor: rejected
