@@ -124,6 +124,21 @@ fi
 
 # ------------------------------------------------- 3c. ollama (local models)
 step "ollama (local LLM + vision model, :11434)"
+# The backend (OLLAMA_LLM_LIBRARY, e.g. vulkan) is fixed when `ollama serve`
+# starts. If the Ollama we started earlier is on a different backend, restart it.
+want_lib=$(printf '%s' "${OLLAMA_LLM_LIBRARY:-}" | tr '[:upper:]' '[:lower:]')
+if [ -n "$want_lib" ] && curl -sf --max-time 2 http://127.0.0.1:11434/api/version >/dev/null 2>&1; then
+  have_lib=$(grep -o 'msg="inference compute".*library=[A-Za-z]*' "$LOGS/ollama.log" 2>/dev/null | tail -1 \
+             | sed 's/.*library=//' | tr '[:upper:]' '[:lower:]')
+  if [ -n "$have_lib" ] && [ "${have_lib#$want_lib}" = "$have_lib" ] && [ "${want_lib#$have_lib}" = "$want_lib" ]; then
+    echo "    running on '$have_lib', want '$want_lib': restarting ollama"
+    pid=$(netstat -ano 2>/dev/null | grep '127.0.0.1:11434 .*LISTENING' | awk '{print $5}' | head -1)
+    [ -n "$pid" ] && { taskkill //PID "$pid" //F //T >/dev/null 2>&1 || kill "$pid" 2>/dev/null; }
+    sleep 2
+  elif [ -z "$have_lib" ]; then
+    echo "    note: ollama was not started by this script; make sure it runs with OLLAMA_LLM_LIBRARY=$want_lib"
+  fi
+fi
 if curl -sf --max-time 2 http://127.0.0.1:11434/api/version >/dev/null 2>&1; then
   ok "already running"
 elif command -v ollama >/dev/null 2>&1; then

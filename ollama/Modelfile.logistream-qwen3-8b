@@ -1,0 +1,9 @@
+# Local tutor/evaluator model for an 8 GB GPU (litellm_config.yaml).
+# qwen3-14b (logistream-qwen3) needs ~10.8 GB with an 8k context, so on an 8 GB
+# card it is split across GPU and CPU: ~5 tok/s on Vulkan, and on an RTX 5050
+# Ollama's CUDA backend crashes on any split model (0xc0000409). qwen3:8b with
+# the same 8k context fits entirely in VRAM.
+#   ollama pull qwen3:8b
+#   ollama create logistream-qwen3-8b -f ollama/Modelfile.logistream-qwen3-8b
+FROM qwen3:8b
+PARAMETER num_ctx 8192
