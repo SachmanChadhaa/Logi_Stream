@@ -42,3 +42,7 @@ demo/logs/*.txt
 # isolated auth mockup
 auth_mockup/target/
 auth_mockup/.env
+
+# local working notes (folded into README.md §16 on 2026-10-24)
+/CLAUDE.md
+/PROGRESS.md

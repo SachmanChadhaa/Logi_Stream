@@ -6,15 +6,40 @@ over the answer.**
 
 [![Open the ML notebook in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/SachmanChadhaa/Logi_Stream/blob/main/notebooks/LogiStream_GRU_XGBoost.ipynb)
 
-LogiStream started as a three-day MVP with one rule: *describe your algorithm in
-plain English (or Hinglish) before you are allowed to write code*. Wrong logic is
-answered by a tutor that is **structurally prevented** from giving the solution:
-every reply is checked by a deterministic verifier before a student sees it.
+LogiStream has **two parts**. Both share one tutor that is **structurally
+prevented** from giving the solution: every reply is checked by a deterministic
+verifier before the student sees it, and it answers with a question, not a fix.
 
-It has since grown into a tutor for **any** problem — typed in, or **read off the
-student's screen** while they work on GeeksforGeeks, LeetCode or their own editor
-— backed by five services, a local vision model, a local language model, and two
-small machine-learning models written in Rust.
+### Part 1 — Learn logic first, then code (curated problem suite)
+
+A Socratic tutor plus a suite of curated problems that teaches *how to think
+before typing*. For each problem the student must first **describe the algorithm
+in plain English or Hinglish**. An evaluator grades that logic against the
+problem's rubric (valid approaches, invariants, known misconceptions); wrong
+logic gets one guiding question at a time; correct logic **unlocks the code
+editor**. The code then runs against hidden tests, and failures are explained in
+terms of the student's *own accepted logic*.
+
+The suite today holds one fully worked problem, **Two Sum**, with its rubric,
+misconceptions and hidden tests (including a 20 000-element test that rejects an
+O(n²) solution). New problems use the same seed format
+(`db/seed/generate_two_sum.py` → `db/init/02_seed.sql`).
+
+### Part 2 — Your own problem, kept in your own problem bank
+
+When a student wants help with a problem **they chose** — typed in, or **read
+off their screen** while they work on GeeksforGeeks, LeetCode or their own
+editor — LogiStream helps them develop the logic and the code for it in one
+free-form conversation (there is no rubric for a problem it has never seen, so
+there is no gate). The problem is **stored in the database under that student**
+so they can come back to it later: statement, examples, constraints, function
+signature, expected time and space complexity, output format, suggested
+edge-case test inputs, and every distinct version of the code they wrote while
+solving it.
+
+Behind both parts: five services, a local vision model, a local language model,
+and two small machine-learning models written in Rust. Everything runs on one
+laptop; screen frames never leave it.
 
 ---
 
@@ -34,6 +59,8 @@ small machine-learning models written in Rust.
 12. [Testing](#12-testing)
 13. [Repository layout](#13-repository-layout)
 14. [Known limitations](#14-known-limitations)
+15. [Future scope: fixing the GPU and vision-model issues](#15-future-scope-fixing-the-gpu-and-vision-model-issues)
+16. [Project history](#16-project-history)
 
 ---
 
@@ -41,9 +68,9 @@ small machine-learning models written in Rust.
 
 | Mode | How it works |
 |---|---|
-| **Sample problem (Two Sum)** | Logic-first gate. Write the algorithm in words → an evaluator grades it against a rubric (approaches, invariants, known misconceptions) → wrong logic gets one Socratic question at a time → correct logic unlocks the editor → code runs against hidden tests → failures go to a code tutor that explains in terms of the student's *own accepted logic*. |
-| **Bring your own problem** | Paste any exercise (statement, constraints, examples, optional stdin → stdout tests). One free-form phase: chat and run any time. Runs without tests are labelled **"ran, not verified"**, never "correct". |
-| **On-screen assistant** | An always-on-top panel (Chrome Picture-in-Picture) with a Siri-style orb. Share a window and it reads the **problem** and the **code you are writing** on any site, offers **"Tutor me on this"**, reviews your code as a *hypothesis*, suggests **test inputs worth trying**, and answers questions about the code *as it is now*. Optional voice input and read-aloud. |
+| **Part 1 — curated problem (Two Sum)** | Logic-first gate. Write the algorithm in words → an evaluator grades it against a rubric (approaches, invariants, known misconceptions) → wrong logic gets one Socratic question at a time → correct logic unlocks the editor → code runs against hidden tests → failures go to a code tutor that explains in terms of the student's *own accepted logic*. |
+| **Part 2 — bring your own problem** | Paste any exercise (statement, constraints, examples, optional stdin → stdout tests). One free-form phase: chat and run any time. Runs without tests are labelled **"ran, not verified"**, never "correct". |
+| **Part 2 — on-screen assistant** | An always-on-top panel (Chrome Picture-in-Picture) with a Siri-style orb. Share a window and it reads the **problem** and the **code you are writing** on any site, offers **"Tutor me on this"**, reviews your code as a *hypothesis*, suggests **test inputs worth trying**, and answers questions about the code *as it is now*. Optional voice input and read-aloud. |
 
 Every tutor reply separates **Verified:** (what actually ran and was checked)
 from **Hypothesis:** (what it suspects), and ends with a question — never a fix.
@@ -382,7 +409,7 @@ set, every `/api` call needs `X-Demo-Passcode`.
 
 The `SessionView` contract (phase, status, messages, last evaluation, last
 execution with hidden tests stripped, diagnosis, temporal memory, debug trace) is
-specified in `CLAUDE.md` §5.2 and extended additively in `docs/BYOP.md`.
+specified in the original MVP contract (§5.2, see §16) and extended additively in `docs/BYOP.md`.
 
 ---
 
@@ -461,7 +488,7 @@ tunnel): see [`demo/DEPLOY_VERCEL.md`](demo/DEPLOY_VERCEL.md).
 
 | Suite | Command | Result |
 |---|---|---|
-| Orchestrator (graph, verifier, observer, temporal, screen problems) | `cd orchestrator && uv run pytest` | 135 passed |
+| Orchestrator (graph, verifier, observer, temporal, screen problems) | `cd orchestrator && uv run pytest` | 137 passed |
 | Java (bucket mapping, validation incl. screen insights) | `cd domain && mvn test` | 24 passed |
 | Gateway (passcode, CORS, rate limit, identity) | `cd gateway && cargo test` | 11 passed |
 | Intel (features, GRU, booster, metrics) | `cd intel && cargo test --release` | 14 passed |
@@ -474,7 +501,6 @@ tunnel): see [`demo/DEPLOY_VERCEL.md`](demo/DEPLOY_VERCEL.md).
 ## 13. Repository layout
 
 ```
-CLAUDE.md               MVP contract (original), PROGRESS.md task log
 db/                     schema + Two Sum seed generator
 domain/                 Java: problems, validation, execution, screen-problem storage
 orchestrator/           Python: LangGraph tutor, verifier, diagnostics, observer, temporal memory
@@ -494,11 +520,168 @@ ollama/                 Modelfile for the 8k-context tutor model
 
 ## 14. Known limitations
 
-* Mocked auth: identities are anonymous per browser.
-* Only Python executes; other languages on screen are reviewed, not run.
-* The vision model is 3B and runs on an 8 GB laptop GPU: it can misread small
-  text, and the GPU cannot hold it and the 8B text model at once, so Ollama
-  swaps them (a few extra seconds on the first turn after a swap).
-* The ML models are trained on scripted, synthetic sessions and are not
-  validated on real students.
+**Product**
+
+* The curated suite (Part 1) has one problem, Two Sum. Adding a problem means
+  writing its rubric, misconceptions and tests by hand.
+* Problems from Part 2 have no rubric, so there is no logic gate and no
+  evaluator verdict; the tutor reasons from the statement, the runs and the
+  rules-based diagnosis.
+* Only Python executes. Code in other languages (e.g. C on GeeksforGeeks) is
+  reviewed as a hypothesis, never run.
+* Mocked auth: identities are anonymous per browser; clearing site data loses
+  access to that student's stored problems.
+
+**Execution**
+
+* `LocalPythonSandbox` is **not a security sandbox**: student code runs with the
+  domain service's privileges (hard timeout, fresh temp dir, no shell, `-I`
+  isolated mode, truncated output). Fine for a single-user local demo only.
+
+**Models and GPU**
+
+* Everything is tuned for one 8 GB laptop GPU (RTX 5050). On that card Ollama
+  0.32.7's CUDA backend is broken (vision answers `@@@@`; split models crash),
+  so the system runs on Ollama's **Vulkan** backend — a workaround, measured on
+  this one machine only.
+* The vision model is 3B: it can misread small text, and it cuts long pages, so
+  a problem's constraints are sometimes not captured (they are then stored as
+  empty, never invented).
+* The 8B text model replaced the 14B to fit in VRAM. It was checked on a few
+  real prompts, not on a full evaluation set; it is weaker in general and can,
+  for example, ask about cases the constraints rule out (an empty array when
+  `n ≥ 1`).
+* The GPU cannot hold the vision and text models at once, so Ollama swaps them
+  (a few extra seconds on the first turn after a swap).
+* The repeat guard is lexical: it catches word-for-word repeats, near-copies and
+  the same closing question, but not every paraphrase.
+* Screen-problem analysis (complexities, expected outputs) comes from a language
+  model and is labelled advisory; it is not verified.
+* The GRU and booster are trained on scripted, synthetic sessions and are not
+  validated on real students; the booster stays in shadow mode.
+
+**Platform**
+
 * Picture-in-Picture, screen capture and Web Speech need Chrome.
+* The Ollama tray app must be started with `OLLAMA_LLM_LIBRARY=vulkan` in the
+  Windows user environment (see GPU notes in §11).
+* A public demo through a free Cloudflare tunnel cuts responses at ~100 s.
+
+---
+
+## 15. Future scope: fixing the GPU and vision-model issues
+
+**What is wrong today.** On the RTX 5050 (Blackwell, compute 12.0, driver
+610.74), Ollama 0.32.7's CUDA builds fail in two ways: the vision encoder returns
+`@@@@` for every image, and any model split between GPU and CPU crashes in a
+matrix multiply (`MUL_MAT failed`, `0xc0000409`). It survives a reboot, so it is
+a software/driver compatibility problem, not a hung GPU. The current fix — the
+Vulkan backend plus models that fit entirely in VRAM — works, but it is a
+workaround. The plan to fix it properly, in order:
+
+1. **Make the check repeatable, then re-test CUDA on every upgrade.** Turn the
+   scripts used for the diagnosis into `demo/gpu_check.sh`: start a throwaway
+   `ollama serve` per backend (CUDA v12, CUDA v13, Vulkan), send one text prompt
+   and one known screenshot, and score the transcription against the expected
+   code. Run it after every Ollama or NVIDIA driver update; switch back to CUDA
+   (clear `OLLAMA_LLM_LIBRARY`) only when it passes.
+2. **Pin a known-good stack.** Record the Ollama version, driver version and
+   backend that passed; turn off Ollama auto-update on the demo machine so a
+   silent update cannot bring the fault back before a presentation.
+3. **Detect the fault at startup, fall back automatically.** Have `start.sh` and
+   the observer's `status()` send one tiny test image when Ollama starts. On
+   `@@@@` or a crash: restart Ollama on Vulkan; if that also fails, run vision on
+   the CPU (`OLLAMA_VLM_NUM_GPU=0`, ~1–2 min a frame) and show it in the UI,
+   instead of the student discovering it mid-session.
+4. **Use a runtime built for this GPU.** Build llama.cpp from source with
+   CUDA 12.8+/13 for `sm_120` (`-DCMAKE_CUDA_ARCHITECTURES=120`) and point
+   `OLLAMA_URL`/LiteLLM at its OpenAI-compatible server; or run vLLM / SGLang
+   under WSL2 for the vision model. Both keep everything local.
+5. **Need less GPU for the same job.**
+   * Run a dedicated OCR pass (PaddleOCR or Tesseract) on the **cropped editor
+     region** for exact code transcription, and use the VLM only for the page
+     summary and the problem statement. OCR is faster, exact on monospaced code
+     and runs well on the CPU.
+   * Send only the regions that changed (the 160×90 change detector already
+     exists) instead of the full 1600 px frame.
+   * Quantise the KV cache (`OLLAMA_KV_CACHE_TYPE=q8_0`) with flash attention, so
+     both models can stay resident and the swap delay disappears.
+6. **Try other model pairs that fit 8 GB together**, scored with the same
+   check: `qwen2.5vl:7b` (Q4) as a single model for both vision and tutoring;
+   `gemma3:4b` (multimodal); `qwen3:4b` as a lighter tutor. `qwen3-vl:4b` was
+   tried and rejected: it puts its whole answer in "thinking" and took 3–5 min a
+   frame.
+7. **Optional, opt-in remote GPU.** A self-hosted GPU box the owner controls
+   could serve the models. The observer refuses non-local hosts by design
+   (frames must not leave the machine), so this would need an explicit setting,
+   transport encryption and a privacy note in the UI — never a third-party
+   vision API.
+
+---
+
+## 16. Project history
+
+Code comments cite sections of the original three-day MVP contract
+(`CLAUDE.md §6.4` and so on). That contract and the day-by-day task log
+(`PROGRESS.md`) were folded into this section on 2026-10-24 and removed from the
+repository; both remain readable in git history (e.g. `git show b3af1a7:CLAUDE.md`).
+
+### Timeline
+
+| Date | Milestone | Evidence |
+|---|---|---|
+| 2026-09-21 · Day 1 | Toolchain and skeleton; Postgres schema + Two Sum seed (20 000-element test, uniqueness asserted); Java domain service; orchestrator core with the verifier and logic-phase graph | `db/verify.sh` 21/21, `domain/verify.sh` 12/12, pytest 49/49, fixtures 6/6 |
+| 2026-09-21 | **Zero-budget pivot**: hosted Judge0 replaced by a real local Python sandbox; LiteLLM proxy reintroduced for automatic failover between free models; models chosen by a bake-off on the real fixtures | bake-off: qwen3 27B 4/4 verdicts |
+| Day 2 | Code phase in the graph; PostgresSaver + FastAPI (session survives a kill and restart); Rust Axum gateway (identity, trace ids, CORS); Next.js UI with "Under the hood" | `verify_api.sh` 22/22, `gateway/verify.sh` 20/20, full F1→F5 run in a browser |
+| Day 3 | Summariser cache (F3 unlock 30.7 s → 2.5 s); three API keys **and** a fallback model; start/stop/healthcheck/pre-warm/rehearsal tooling | cold start from a wiped volume in **53 s**; rehearsal **65 s** (was 130.5 s) |
+| 2026-10-23 | **Part 2**: bring your own problem; demo passcode, CORS allow-list and rate limits; temporal memory and deterministic diagnosis; on-screen assistant with a local vision model; local Ollama text model; Rust GRU + booster sidecar | pytest 120, `verify_byop.py` 41/41 |
+| 2026-10-23 | UI revamp (Cursor Dark theme, Lucide icons, Siri-style orb); assistant follows the problem on screen and reads the student's code | real-Chrome runs |
+| 2026-10-24 | Judge0 removed; screen problems stored in depth with code snapshots; repeat-loop fixes; this README and the Colab notebook | pytest 135, mvn 24, cargo 11 |
+| 2026-10-24 | **GPU fixed**: Vulkan backend, qwen3:8b text model (tutor reply 106 s → 21 s), vision reads the test frame's code exactly | end-to-end through the gateway; pytest 137 |
+
+### The mini golden set (logic evaluator, Day 1)
+
+| Fixture | Student's logic | Verdict | Approach / misconception |
+|---|---|---|---|
+| F1 | nested loops over every pair | FAIL | `nested-loop` |
+| F2 (chat) | "can I remember numbers I've seen?" | tutor replies | — |
+| F3 | one pass with a lookup of seen values | PASS | `lookup-single-pass` |
+| F3b | sort value–index pairs, two pointers | PASS | `sort-two-pointer` |
+| F6 | "use hashmap" | FAIL | (gaming attempt) |
+| F3 again, fresh thread | — | PASS from cache | no LLM call |
+
+Every delivered tutor turn was checked against all nine forbidden terms (e.g.
+"hashmap", "complement", "two pointer"): **zero leaks**. F1's reply, in the
+student's own Hinglish: *"Agar array mein 20,000 numbers hon, toh tumhara
+approach kitne pairs check karega aur kya har pair ko dekhna sach mein zaroori
+hai?"*
+
+### Key decisions
+
+* **Real execution, not a mock.** The local sandbox produces genuine
+  `SyntaxError`s, `KeyError`s, timeouts and wrong answers, so any code typed
+  during a demo gets a truthful verdict. A timeout reports Judge0 status 5 (TLE),
+  not 13 (internal error), so the tutor still explains it.
+* **The verdict cache degrades to a no-op**: if Postgres is unreachable it logs
+  a warning; a cache outage never takes a session down.
+* **Tutor replies are never cached.** Verdicts and summaries are; a tutor turn
+  is generated and verified fresh for each conversation.
+* **The Java service runs in UTC**: the host's legacy `Asia/Calcutta` zone id
+  made every Postgres connection fail.
+* **Rust on the GNU toolchain**: no MSVC on this machine, plus an old MinGW on
+  the PATH and a missing assembler — fixed without admin rights.
+* **Local models (2026-10-23)**: free cloud models were withdrawn, so the
+  primary model became a local Ollama model; OpenRouter stays as a backup group.
+* **Booster in shadow mode**: it loses to the rules on held-out data, so its
+  scores are shown but never reorder causes.
+* **Vulkan + qwen3:8b (2026-10-24)**: see §15.
+
+### Deviations from the original specification
+
+| Original spec | What was built | Why |
+|---|---|---|
+| WSL2 Ubuntu shell | Git Bash | no Ubuntu distro installed |
+| Hosted Judge0 | Local Python subprocess sandbox; Judge0 code removed 2026-10-24 | zero budget; offline and free |
+| LiteLLM deferred | LiteLLM in front of every model call | automatic failover |
+| Paid cloud models | Free models, then local Ollama (qwen3-14b, now qwen3:8b) | zero budget; free models withdrawn; 8 GB GPU |
+| One problem, logic gate always | Part 2: any problem, no gate (no rubric) | owner's brief, 2026-10-23 |
